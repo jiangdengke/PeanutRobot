@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 不可点击状态 -->
+    <item android:drawable="@color/grey_500" android:state_enabled="false"/>
+
+    <!-- 按下状态 -->
+    <item android:drawable="@color/blue" android:state_pressed="true"/>
+
+    <!-- 获得焦点状态 -->
+    <item android:drawable="@color/blue" android:state_focused="true"/>
+
+    <!-- 默认状态（可点击但未点击） -->
+    <item android:drawable="@color/blue"/>
+</selector>
