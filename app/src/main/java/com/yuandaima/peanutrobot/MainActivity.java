@@ -105,6 +105,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private String TAG="MainActivity===";
     private static final int ARRIVE_STAY_DURATION = 3000;
     private static final long IDLE_LOCK_DELAY_MS = 60 * 1000L;
+    private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
+    private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
@@ -133,10 +135,18 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
     private boolean pointUiBound = false;
+    private int pointRefreshRetryCount = 0;
+    private boolean pointAutoRefreshActive = false;
     private final Runnable idleLockRunnable = new Runnable() {
         @Override
         public void run() {
             showIdleLock();
+        }
+    };
+    private final Runnable pointRefreshRetryRunnable = new Runnable() {
+        @Override
+        public void run() {
+            refreshPointData(false);
         }
     };
     private DestModel destModel=new DestModel();
@@ -780,24 +790,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         Log.d("routeNodes","initNavManager");
         NavManager.getInstance().init(MainActivity.this, 3000, 2, true);
         // routeNodes = NavManager.getInstance().getRouteNodes();
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                String destList = null;
-                if (PeanutRuntime.getInstance().getRuntimeInfo() != null) {
-                    destList = PeanutRuntime.getInstance().getRuntimeInfo().getDestList();
-                }
-                List<DestModel.DataBean> remotePointData = parseRemotePointData(destList);
-                if (!remotePointData.isEmpty()) {
-                    destModel.setData(remotePointData);
-                } else {
-                    destModel.setData(new ArrayList<>());
-                }
-                mInitView();
-                initListener();
-                Log.d("routeNodes", "destList: " + destList);
-            }
-        }, 1000);
+        startPointAutoRefresh();
 //
     }
 
@@ -816,6 +809,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         pointUiBound = true;
         mBinding.tvNavigate.setOnClickListener(this);
         mBinding.tvSecondaryScreenDisplay.setOnClickListener(this);
+        mBinding.tvRefreshPoints.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -906,6 +900,58 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         return result;
     }
 
+    private void startPointAutoRefresh() {
+        pointRefreshRetryCount = 0;
+        pointAutoRefreshActive = true;
+        handler.removeCallbacks(pointRefreshRetryRunnable);
+        handler.postDelayed(pointRefreshRetryRunnable, 1000);
+    }
+
+    private void refreshPointData(boolean manualRefresh) {
+        if (manualRefresh) {
+            pointRefreshRetryCount = 0;
+            pointAutoRefreshActive = true;
+            handler.removeCallbacks(pointRefreshRetryRunnable);
+            mBinding.tvPointEmpty.setText("正在刷新点位");
+            tip("正在刷新点位");
+        }
+
+        String destList = null;
+        RuntimeInfo runtimeInfo = PeanutRuntime.getInstance().getRuntimeInfo();
+        if (runtimeInfo != null) {
+            destList = runtimeInfo.getDestList();
+        }
+
+        List<DestModel.DataBean> remotePointData = parseRemotePointData(destList);
+        if (!remotePointData.isEmpty()) {
+            destModel.setData(remotePointData);
+            mBinding.tvPointEmpty.setText("未获取到点位");
+            pointAutoRefreshActive = false;
+            handler.removeCallbacks(pointRefreshRetryRunnable);
+            if (manualRefresh) {
+                tip("点位已刷新：" + remotePointData.size() + "个");
+            }
+        } else {
+            destModel.setData(new ArrayList<>());
+            mBinding.tvPointEmpty.setText("未获取到点位");
+            if (manualRefresh) {
+                tip("未获取到点位");
+            }
+            if (pointAutoRefreshActive && pointRefreshRetryCount < POINT_REFRESH_MAX_RETRY_COUNT) {
+                pointRefreshRetryCount++;
+                handler.postDelayed(pointRefreshRetryRunnable, POINT_REFRESH_RETRY_DELAY_MS);
+            } else {
+                pointAutoRefreshActive = false;
+            }
+        }
+
+        mInitView();
+        initListener();
+        Log.d("routeNodes", "refreshPointData manual=" + manualRefresh
+                + ", retry=" + pointRefreshRetryCount
+                + ", destList=" + destList);
+    }
+
     private void replacePointData(PointAdapter adapter, List<DestModel.DataBean> data) {
         if (adapter == null) {
             return;
@@ -986,6 +1032,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(idleLockRunnable);
+        handler.removeCallbacks(pointRefreshRetryRunnable);
         PeanutSDK.getInstance().release();
         NavManager.getInstance().stop();
         NavManager.getInstance().release();
@@ -1118,6 +1165,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
         }else if (id==mBinding.tvSecondaryScreenDisplay.getId()){
             //   startHardwareTests(null);
+        }else if (id==mBinding.tvRefreshPoints.getId()){
+            refreshPointData(true);
         }
     }
 
