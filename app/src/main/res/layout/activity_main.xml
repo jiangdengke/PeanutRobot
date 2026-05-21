@@ -78,6 +78,21 @@
         app:layout_constraintBottom_toTopOf="@+id/ll_bottom_actions"
         android:layout_marginTop="10dp"/>
 
+    <TextView
+        android:id="@+id/tv_point_empty"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:gravity="center"
+        android:text="未获取到点位"
+        android:textColor="@color/grey_700"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@+id/ll_bottom_actions"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/guideline_vertical_split"
+        app:layout_constraintTop_toTopOf="parent" />
+
     <androidx.appcompat.widget.LinearLayoutCompat
         android:id="@+id/ll_bottom_actions"
         android:layout_width="0dp"

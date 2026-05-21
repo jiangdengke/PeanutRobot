@@ -114,7 +114,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final String IDLE_IMAGE_MODE_FIT = "fit";
     private static final String IDLE_IMAGE_MODE_FILL = "fill";
     private static final String IDLE_IMAGE_MODE_STRETCH = "stretch";
-    private static final int LOCAL_POINT_COUNT = 12;
     private ActivityMainBinding mBinding;
     private PointAdapter mAdapter,verticalAdapter;
     private MediaAdapter mediaAdapter;
@@ -133,7 +132,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean unlockDialogShowing = false;
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
-    private boolean usingLocalPointData = true;
     private boolean pointUiBound = false;
     private final Runnable idleLockRunnable = new Runnable() {
         @Override
@@ -173,9 +171,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         window.getDecorView().setSystemUiVisibility(8192);
         mBinding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(mBinding.getRoot());
-        if (destModel.getData() == null || destModel.getData().isEmpty()) {
-            destModel.setData(buildFallbackPointData());
-        }
         mInitView();
         initListener();
         initIdleLock();
@@ -795,12 +790,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 List<DestModel.DataBean> remotePointData = parseRemotePointData(destList);
                 if (!remotePointData.isEmpty()) {
                     destModel.setData(remotePointData);
-                    usingLocalPointData = false;
                 } else {
-                    usingLocalPointData = true;
-                    if (destModel.getData() == null || destModel.getData().isEmpty()) {
-                        destModel.setData(buildFallbackPointData());
-                    }
+                    destModel.setData(new ArrayList<>());
                 }
                 mInitView();
                 initListener();
@@ -860,6 +851,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private void mInitView() {
         List<DestModel.DataBean> displayData = getDisplayPointData();
+        boolean hasPointData = !displayData.isEmpty();
+        mBinding.tvPointEmpty.setVisibility(hasPointData ? View.GONE : View.VISIBLE);
 
         // List<RouteNode> nodeList = Arrays.asList(routeNodes);
         //pointList
@@ -894,7 +887,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         if (destModel != null && destModel.getData() != null && !destModel.getData().isEmpty()) {
             return destModel.getData();
         }
-        return buildFallbackPointData();
+        return new ArrayList<>();
     }
 
     private List<DestModel.DataBean> parseRemotePointData(String destList) {
@@ -911,18 +904,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             Log.e(TAG, "解析机器人点位失败: " + e.getMessage(), e);
         }
         return result;
-    }
-
-    private List<DestModel.DataBean> buildFallbackPointData() {
-        List<DestModel.DataBean> fallback = new ArrayList<>();
-        for (int i = 1; i <= LOCAL_POINT_COUNT; i++) {
-            DestModel.DataBean item = new DestModel.DataBean();
-            item.setId(i);
-            item.setName("测试点位" + i);
-            item.setType("local");
-            fallback.add(item);
-        }
-        return fallback;
     }
 
     private void replacePointData(PointAdapter adapter, List<DestModel.DataBean> data) {
@@ -1085,8 +1066,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         int id = v.getId();
 
         if (id==mBinding.tvNavigate.getId()){
-            if (usingLocalPointData) {
-                tip("当前显示的是测试点位，接入机器人数据后才能导航");
+            if (mAdapter == null || mAdapter.getData().isEmpty()) {
+                tip("未获取到点位");
                 return;
             }
             flag="";
