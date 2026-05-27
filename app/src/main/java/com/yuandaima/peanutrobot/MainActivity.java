@@ -116,6 +116,17 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final String IDLE_IMAGE_MODE_FIT = "fit";
     private static final String IDLE_IMAGE_MODE_FILL = "fill";
     private static final String IDLE_IMAGE_MODE_STRETCH = "stretch";
+    private static final int IDLE_UNLOCK_TAP_COUNT = 5;
+    private static final long IDLE_UNLOCK_TAP_WINDOW_MS = 2500L;
+    private static final int IDLE_UNLOCK_HOTSPOT_DP = 120;
+    private static final int NORMAL_SYSTEM_UI_FLAGS = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+    private static final int IDLE_LOCK_SYSTEM_UI_FLAGS =
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
     private ActivityMainBinding mBinding;
     private PointAdapter mAdapter,verticalAdapter;
     private MediaAdapter mediaAdapter;
@@ -135,6 +146,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
     private boolean pointUiBound = false;
+    private int idleUnlockTapCount = 0;
+    private long idleUnlockFirstTapTime = 0L;
     private int pointRefreshRetryCount = 0;
     private boolean pointAutoRefreshActive = false;
     private final Runnable idleLockRunnable = new Runnable() {
@@ -178,7 +191,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         window.addFlags(-2147483648);
         window.setStatusBarColor(getResources().getColor(R.color.white));
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
-        window.getDecorView().setSystemUiVisibility(8192);
+        window.getDecorView().setSystemUiVisibility(NORMAL_SYSTEM_UI_FLAGS);
         mBinding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(mBinding.getRoot());
         mInitView();
@@ -199,6 +212,9 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     protected void onResume() {
         super.onResume();
         handler.postDelayed(uploadRunnable, 10000);
+        if (idleLocked) {
+            enterIdleLockFullscreen();
+        }
         resetIdleLockTimer();
     }
     boolean mFlag=false;
@@ -216,6 +232,14 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             resetIdleLockTimer();
         }
         return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && idleLocked) {
+            enterIdleLockFullscreen();
+        }
     }
 
     private void initUSBCameraManager() {
@@ -251,15 +275,17 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private void initIdleLock() {
         applyIdleScreenConfig();
-        mBinding.flIdleLock.setOnClickListener(v -> showUnlockDialog());
-        mBinding.tvIdleUnlockHint.setOnClickListener(v -> showUnlockDialog());
+        mBinding.flIdleLock.setOnTouchListener((v, event) -> handleIdleLockTouch(event));
+        mBinding.tvIdleUnlockHint.setVisibility(View.GONE);
         mBinding.tvIdleScreenLock.setOnClickListener(v -> showIdleLock());
         mBinding.tvIdleScreenSettings.setOnClickListener(v -> showIdleScreenSettingsDialog());
         hideIdleLock();
     }
 
     private void showIdleLock() {
+        enterIdleLockFullscreen();
         idleLocked = true;
+        resetHiddenUnlockTapState();
         handler.removeCallbacks(idleLockRunnable);
         applyIdleScreenConfig();
         mBinding.flIdleLock.setVisibility(View.VISIBLE);
@@ -268,7 +294,9 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private void hideIdleLock() {
         idleLocked = false;
+        resetHiddenUnlockTapState();
         mBinding.flIdleLock.setVisibility(View.GONE);
+        exitIdleLockFullscreen();
         resetIdleLockTimer();
     }
 
@@ -296,11 +324,63 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         String mode = MmkvUtils.decodeString(KEY_IDLE_IMAGE_MODE);
         if (IDLE_IMAGE_MODE_STRETCH.equals(mode)) {
             mBinding.ivIdleScreen.setScaleType(ImageView.ScaleType.FIT_XY);
-        } else if (IDLE_IMAGE_MODE_FILL.equals(mode)) {
-            mBinding.ivIdleScreen.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        } else {
+        } else if (IDLE_IMAGE_MODE_FIT.equals(mode)) {
             mBinding.ivIdleScreen.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        } else {
+            mBinding.ivIdleScreen.setScaleType(ImageView.ScaleType.CENTER_CROP);
         }
+    }
+
+    private boolean handleIdleLockTouch(MotionEvent event) {
+        if (event.getActionMasked() != MotionEvent.ACTION_UP) {
+            return true;
+        }
+
+        if (!isInHiddenUnlockHotspot(event)) {
+            resetHiddenUnlockTapState();
+            return true;
+        }
+
+        long now = System.currentTimeMillis();
+        if (idleUnlockFirstTapTime == 0L || now - idleUnlockFirstTapTime > IDLE_UNLOCK_TAP_WINDOW_MS) {
+            idleUnlockFirstTapTime = now;
+            idleUnlockTapCount = 1;
+        } else {
+            idleUnlockTapCount++;
+        }
+
+        if (idleUnlockTapCount >= IDLE_UNLOCK_TAP_COUNT) {
+            resetHiddenUnlockTapState();
+            showUnlockDialog();
+        }
+        return true;
+    }
+
+    private boolean isInHiddenUnlockHotspot(MotionEvent event) {
+        int hotspotSize = dp(IDLE_UNLOCK_HOTSPOT_DP);
+        return event.getX() >= 0
+                && event.getY() >= 0
+                && event.getX() <= hotspotSize
+                && event.getY() <= hotspotSize;
+    }
+
+    private void resetHiddenUnlockTapState() {
+        idleUnlockTapCount = 0;
+        idleUnlockFirstTapTime = 0L;
+    }
+
+    private void enterIdleLockFullscreen() {
+        Window window = getWindow();
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+        window.getDecorView().setSystemUiVisibility(IDLE_LOCK_SYSTEM_UI_FLAGS);
+    }
+
+    private void exitIdleLockFullscreen() {
+        Window window = getWindow();
+        window.setStatusBarColor(getResources().getColor(R.color.white));
+        window.setNavigationBarColor(Color.BLACK);
+        window.getDecorView().setSystemUiVisibility(NORMAL_SYSTEM_UI_FLAGS);
     }
 
     private void showUnlockDialog() {
@@ -402,12 +482,12 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         modeGroup.addView(stretchButton);
 
         String mode = MmkvUtils.decodeString(KEY_IDLE_IMAGE_MODE);
-        if (IDLE_IMAGE_MODE_FILL.equals(mode)) {
-            modeGroup.check(fillId);
-        } else if (IDLE_IMAGE_MODE_STRETCH.equals(mode)) {
+        if (IDLE_IMAGE_MODE_STRETCH.equals(mode)) {
             modeGroup.check(stretchId);
-        } else {
+        } else if (IDLE_IMAGE_MODE_FIT.equals(mode)) {
             modeGroup.check(fitId);
+        } else {
+            modeGroup.check(fillId);
         }
         content.addView(modeGroup);
 
