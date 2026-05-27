@@ -8,8 +8,8 @@ android {
     compileSdk 34
 
     defaultConfig {
-        // applicationId "com.keenon.zealq"
-        applicationId "com.jdk.org"
+        applicationId "com.keenon.zealq"
+        // applicationId "com.jdk.org"
         minSdk 23
         targetSdk 33
         versionCode 2
