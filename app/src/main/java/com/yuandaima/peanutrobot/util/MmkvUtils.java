@@ -60,6 +60,10 @@ public class MmkvUtils {
         return mv.decodeInt(key, 100);
     }
 
+    public static Integer decodeInt(String key, int defaultValue) {
+        return mv.decodeInt(key, defaultValue);
+    }
+
     public static Double decodeDouble(String key) {
         return mv.decodeDouble(key, 0.00);
     }

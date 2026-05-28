@@ -104,6 +104,7 @@ import okio.ByteString;
 public class MainActivity extends AppCompatActivity implements  View.OnClickListener, Navigation.Listener{
     private String TAG="MainActivity===";
     private static final int ARRIVE_STAY_DURATION = 3000;
+    private static final int DEFAULT_NAVIGATION_SPEED = 30;
     private static final long IDLE_LOCK_DELAY_MS = 60 * 1000L;
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
@@ -1261,7 +1262,9 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         peanutNavigation.setTargets(routeNodes);
 
  //       NavManager.getInstance().setSpeed(100);
-        NavManager.getInstance().setSpeed(routeNodes.size()==1? MmkvUtils.decodeInt("single_point_speed"):MmkvUtils.decodeInt("multiple_point_speed"));
+        NavManager.getInstance().setSpeed(routeNodes.size()==1
+                ? MmkvUtils.decodeInt("single_point_speed", DEFAULT_NAVIGATION_SPEED)
+                : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED));
         NavManager.getInstance().prepare();
     }
 
