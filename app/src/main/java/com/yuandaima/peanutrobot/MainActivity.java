@@ -98,6 +98,11 @@ import java.util.Arrays;
 import java.util.List;
 
 import fi.iki.elonen.NanoHTTPD;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 
@@ -109,6 +114,12 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
+    private static final String WAREHOUSE_TASK_WS = "ws://192.168.112.194:9098";
+    private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
+    private static final int GO_CHARGE_TASK_ID = 789115;
+    private static final int PATROL_WAREHOUSE_TASK_ID = 789110;
+    private static final String GO_CHARGE_ROBOT_TASK_ID = "0000004529";
+    private static final String PATROL_WAREHOUSE_ROBOT_TASK_ID = "0000004528";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -141,6 +152,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private Runnable myRunnable;
     private WebSocketService webSocketService;
+    private final OkHttpClient warehouseTaskWebSocketClient = new OkHttpClient.Builder().build();
     Handler handler = new Handler(Looper.getMainLooper());
     private boolean idleLocked = false;
     private boolean unlockDialogShowing = false;
@@ -891,6 +903,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvNavigate.setOnClickListener(this);
         mBinding.tvSecondaryScreenDisplay.setOnClickListener(this);
         mBinding.tvRefreshPoints.setOnClickListener(this);
+        mBinding.tvGoCharge.setOnClickListener(this);
+        mBinding.tvPatrolWarehouse.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -1248,7 +1262,66 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             //   startHardwareTests(null);
         }else if (id==mBinding.tvRefreshPoints.getId()){
             refreshPointData(true);
+        }else if (id==mBinding.tvGoCharge.getId()){
+            sendGoChargeTask();
+        }else if (id==mBinding.tvPatrolWarehouse.getId()){
+            sendPatrolWarehouseTask();
         }
+    }
+
+    private void sendGoChargeTask() {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("task_id", GO_CHARGE_TASK_ID);
+            payload.put("robot_task_id", GO_CHARGE_ROBOT_TASK_ID);
+            sendWarehouseTask("回充", payload.toString());
+        } catch (JSONException e) {
+            Log.e(TAG, "创建回充指令失败", e);
+            tip("回充指令创建失败");
+        }
+    }
+
+    private void sendPatrolWarehouseTask() {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("task_id", PATROL_WAREHOUSE_TASK_ID);
+            payload.put("is_return", true);
+            payload.put("robot_task_id", PATROL_WAREHOUSE_ROBOT_TASK_ID);
+            sendWarehouseTask("巡仓", payload.toString());
+        } catch (JSONException e) {
+            Log.e(TAG, "创建巡仓指令失败", e);
+            tip("巡仓指令创建失败");
+        }
+    }
+
+    private void sendWarehouseTask(String taskName, String payload) {
+        Log.d(TAG, taskName + "指令发送到 " + WAREHOUSE_TASK_WS + ": " + payload);
+        Request request = new Request.Builder()
+                .url(WAREHOUSE_TASK_WS)
+                .build();
+
+        warehouseTaskWebSocketClient.newWebSocket(request, new WebSocketListener() {
+            @Override
+            public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
+                boolean sent = webSocket.send(payload);
+                Log.d(TAG, taskName + "指令" + (sent ? "发送成功" : "发送失败") + ": " + payload);
+                tip(taskName + (sent ? "指令已发送" : "指令发送失败"));
+                webSocket.close(1000, taskName + " command sent");
+            }
+
+            @Override
+            public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, Response response) {
+                Log.e(TAG, taskName + "指令连接失败: " + t.getMessage(), t);
+                tip(taskName + "指令发送失败");
+            }
+
+            @Override
+            public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+                Log.d(TAG, taskName + "指令连接关闭 code=" + code + ", reason=" + reason);
+            }
+        });
     }
 
     /**
