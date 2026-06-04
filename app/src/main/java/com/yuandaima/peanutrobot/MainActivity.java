@@ -118,8 +118,11 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
     private static final int GO_CHARGE_TASK_ID = 789115;
     private static final int PATROL_WAREHOUSE_TASK_ID = 789110;
+    private static final int RECALL_TASK_ID = 789116;
     private static final String GO_CHARGE_ROBOT_TASK_ID = "0000004529";
     private static final String PATROL_WAREHOUSE_ROBOT_TASK_ID = "0000004528";
+    private static final int RECALL_ROBOT_TASK_ID = 4528;
+    private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -159,6 +162,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
     private boolean pointUiBound = false;
+    private boolean warehouseTaskPending = false;
+    private String pendingWarehouseTaskName = "";
+    private WebSocket pendingWarehouseTaskWebSocket;
+    private int warehouseTaskLoadingStep = 0;
     private int idleUnlockTapCount = 0;
     private long idleUnlockFirstTapTime = 0L;
     private int pointRefreshRetryCount = 0;
@@ -173,6 +180,27 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         @Override
         public void run() {
             refreshPointData(false);
+        }
+    };
+    private final Runnable warehouseTaskTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            handleWarehouseTaskFailure(pendingWarehouseTaskName, "接口响应超时");
+        }
+    };
+    private final Runnable warehouseTaskLoadingRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!warehouseTaskPending || TextUtils.isEmpty(pendingWarehouseTaskName)) {
+                return;
+            }
+            warehouseTaskLoadingStep = (warehouseTaskLoadingStep + 1) % 4;
+            StringBuilder loadingText = new StringBuilder("发送中");
+            for (int i = 0; i < warehouseTaskLoadingStep; i++) {
+                loadingText.append(".");
+            }
+            setWarehouseTaskButtonText(pendingWarehouseTaskName, loadingText.toString());
+            handler.postDelayed(this, 500);
         }
     };
     private DestModel destModel=new DestModel();
@@ -905,6 +933,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvRefreshPoints.setOnClickListener(this);
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
+        mBinding.tvRecall.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -1266,6 +1295,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             sendGoChargeTask();
         }else if (id==mBinding.tvPatrolWarehouse.getId()){
             sendPatrolWarehouseTask();
+        }else if (id==mBinding.tvRecall.getId()){
+            sendRecallTask();
         }
     }
 
@@ -1296,7 +1327,27 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         }
     }
 
+    private void sendRecallTask() {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("task_id", RECALL_TASK_ID);
+            payload.put("is_return", true);
+            payload.put("robot_task_id", RECALL_ROBOT_TASK_ID);
+            sendWarehouseTask("召回", payload.toString());
+        } catch (JSONException e) {
+            Log.e(TAG, "创建召回指令失败", e);
+            tip("召回指令创建失败");
+        }
+    }
+
     private void sendWarehouseTask(String taskName, String payload) {
+        if (warehouseTaskPending) {
+            tip(pendingWarehouseTaskName + "请求发送中，请稍候");
+            return;
+        }
+
+        beginWarehouseTaskLoading(taskName);
         Log.d(TAG, taskName + "指令发送到 " + WAREHOUSE_TASK_WS + ": " + payload);
         Request request = new Request.Builder()
                 .url(WAREHOUSE_TASK_WS)
@@ -1305,16 +1356,36 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         warehouseTaskWebSocketClient.newWebSocket(request, new WebSocketListener() {
             @Override
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
+                pendingWarehouseTaskWebSocket = webSocket;
                 boolean sent = webSocket.send(payload);
                 Log.d(TAG, taskName + "指令" + (sent ? "发送成功" : "发送失败") + ": " + payload);
-                tip(taskName + (sent ? "指令已发送" : "指令发送失败"));
-                webSocket.close(1000, taskName + " command sent");
+                if (sent) {
+                    showWarehouseTaskStatus(taskName + "请求已发送，等待接口确认...");
+                } else {
+                    handleWarehouseTaskFailure(taskName, "请求发送失败");
+                    webSocket.close(1000, taskName + " send failed");
+                }
+            }
+
+            @Override
+            public void onMessage(@NonNull WebSocket webSocket, String text) {
+                Log.d(TAG, taskName + "指令收到响应: " + text);
+                handleWarehouseTaskResponse(taskName, text);
+                webSocket.close(1000, taskName + " response received");
+            }
+
+            @Override
+            public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
+                String text = bytes.utf8();
+                Log.d(TAG, taskName + "指令收到二进制响应: " + text);
+                handleWarehouseTaskResponse(taskName, text);
+                webSocket.close(1000, taskName + " response received");
             }
 
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, Response response) {
                 Log.e(TAG, taskName + "指令连接失败: " + t.getMessage(), t);
-                tip(taskName + "指令发送失败");
+                handleWarehouseTaskFailure(taskName, "连接失败：" + t.getMessage());
             }
 
             @Override
@@ -1322,6 +1393,125 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 Log.d(TAG, taskName + "指令连接关闭 code=" + code + ", reason=" + reason);
             }
         });
+    }
+
+    private void beginWarehouseTaskLoading(String taskName) {
+        warehouseTaskPending = true;
+        pendingWarehouseTaskName = taskName;
+        pendingWarehouseTaskWebSocket = null;
+        warehouseTaskLoadingStep = 0;
+        setWarehouseTaskButtonsEnabled(false);
+        setWarehouseTaskButtonText(taskName, "发送中...");
+        showWarehouseTaskStatus(taskName + "请求发送中...");
+        handler.removeCallbacks(warehouseTaskLoadingRunnable);
+        handler.post(warehouseTaskLoadingRunnable);
+        handler.removeCallbacks(warehouseTaskTimeoutRunnable);
+        handler.postDelayed(warehouseTaskTimeoutRunnable, WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS);
+    }
+
+    private void handleWarehouseTaskResponse(String taskName, String responseText) {
+        if (TextUtils.isEmpty(responseText)) {
+            handleWarehouseTaskFailure(taskName, "接口返回为空");
+            return;
+        }
+
+        try {
+            JSONObject responseJson = new JSONObject(responseText);
+            if (!responseJson.has("ok")) {
+                handleWarehouseTaskFailure(taskName, "接口返回缺少 ok 字段");
+                return;
+            }
+
+            boolean accepted = responseJson.optBoolean("ok", false);
+            String message = responseJson.optString("msg", "");
+            if (TextUtils.isEmpty(message)) {
+                message = accepted ? "指令已入队" : "接口返回失败";
+            }
+
+            if (accepted) {
+                completeWarehouseTask(taskName, taskName + "请求已受理：" + message);
+            } else {
+                handleWarehouseTaskFailure(taskName, message);
+            }
+        } catch (JSONException e) {
+            handleWarehouseTaskFailure(taskName, "接口返回不是合法 JSON");
+        }
+    }
+
+    private void completeWarehouseTask(String taskName, String message) {
+        if (!warehouseTaskPending) {
+            return;
+        }
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                finishWarehouseTaskUi(taskName);
+                mBinding.tvWarehouseTaskStatus.setText(message);
+                mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.blue));
+                tip(message);
+            }
+        });
+    }
+
+    private void handleWarehouseTaskFailure(String taskName, String message) {
+        if (!warehouseTaskPending) {
+            return;
+        }
+        Log.e(TAG, taskName + "指令失败: " + message);
+        closePendingWarehouseTaskWebSocket();
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                finishWarehouseTaskUi(taskName);
+                String displayMessage = taskName + "失败：" + message;
+                mBinding.tvWarehouseTaskStatus.setText(displayMessage);
+                mBinding.tvWarehouseTaskStatus.setTextColor(Color.RED);
+                tip(displayMessage);
+            }
+        });
+    }
+
+    private void finishWarehouseTaskUi(String taskName) {
+        handler.removeCallbacks(warehouseTaskTimeoutRunnable);
+        handler.removeCallbacks(warehouseTaskLoadingRunnable);
+        warehouseTaskPending = false;
+        pendingWarehouseTaskName = "";
+        pendingWarehouseTaskWebSocket = null;
+        setWarehouseTaskButtonText(taskName, taskName);
+        setWarehouseTaskButtonsEnabled(true);
+    }
+
+    private void setWarehouseTaskButtonsEnabled(boolean enabled) {
+        mBinding.tvGoCharge.setEnabled(enabled);
+        mBinding.tvPatrolWarehouse.setEnabled(enabled);
+        mBinding.tvRecall.setEnabled(enabled);
+    }
+
+    private void setWarehouseTaskButtonText(String taskName, String text) {
+        if ("回充".equals(taskName)) {
+            mBinding.tvGoCharge.setText(text);
+        } else if ("巡仓".equals(taskName)) {
+            mBinding.tvPatrolWarehouse.setText(text);
+        } else if ("召回".equals(taskName)) {
+            mBinding.tvRecall.setText(text);
+        }
+    }
+
+    private void showWarehouseTaskStatus(String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mBinding.tvWarehouseTaskStatus.setText(message);
+                mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.grey_700));
+            }
+        });
+    }
+
+    private void closePendingWarehouseTaskWebSocket() {
+        if (pendingWarehouseTaskWebSocket != null) {
+            pendingWarehouseTaskWebSocket.close(1000, "warehouse task finished");
+            pendingWarehouseTaskWebSocket = null;
+        }
     }
 
     /**
