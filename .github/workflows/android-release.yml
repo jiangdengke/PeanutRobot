@@ -54,16 +54,31 @@ jobs:
         run: |
           apk_name="PeanutRobot-${GITHUB_REF_NAME}-debug.apk"
           notes_file="release-notes.md"
-          tag_message="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")"
+          git fetch --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+          tag_type="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(objecttype)')"
+          tag_message=""
+          if [ "${tag_type}" = "tag" ]; then
+            tag_message="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+          fi
 
           if [ -z "${tag_message}" ]; then
-            tag_message="发布 ${GITHUB_REF_NAME}"
+            tag_message="- 本次发布未提供明确的版本更新说明"
+          fi
+
+          release_notes="${tag_message}"
+          if [[ "${release_notes}" == 发布\ ${GITHUB_REF_NAME}* ]]; then
+            release_notes="$(printf '%s\n' "${release_notes}" | awk 'NR == 1 { next } NR == 2 && $0 == "" { next } { print }')"
+          fi
+
+          if [ -z "${release_notes}" ]; then
+            release_notes="- 本次发布未提供明确的版本更新说明"
           fi
 
           {
             echo "## 更新内容"
             echo
-            printf '%s\n' "${tag_message}"
+            printf '%s\n' "${release_notes}"
             echo
             echo "## 产物"
             echo "- ${apk_name}"
