@@ -75,7 +75,7 @@ jobs:
           fi
 
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" "${release_args[@]}"
+            gh release edit "${GITHUB_REF_NAME}" "${release_args[@]}" --draft=false
             gh release upload "${GITHUB_REF_NAME}" "${apk_name}" --clobber
           else
             gh release create "${GITHUB_REF_NAME}" "${apk_name}" "${release_args[@]}"
