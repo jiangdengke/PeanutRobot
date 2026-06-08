@@ -57,7 +57,7 @@ allprojects {
         // 添加阿里云镜像（国内用户）
         maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/google' }
-//        maven { url 'https://maven.aliyun.com/repository/jcenter' }
+        maven { url 'https://maven.aliyun.com/repository/jcenter' }
         maven { url  'https://repository.liferay.com/nexus/content/repositories/public' }
         maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
         //    jcenter()
