@@ -123,6 +123,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final String PATROL_WAREHOUSE_ROBOT_TASK_ID = "0000004528";
     private static final int RECALL_ROBOT_TASK_ID = 4528;
     private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
+    private static final long STARTUP_GO_CHARGE_DELAY_MS = 5000L;
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -163,6 +164,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean coreInitialized = false;
     private boolean pointUiBound = false;
     private boolean warehouseTaskPending = false;
+    private boolean startupGoChargeSent = false;
     private String pendingWarehouseTaskName = "";
     private WebSocket pendingWarehouseTaskWebSocket;
     private int warehouseTaskLoadingStep = 0;
@@ -201,6 +203,12 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             }
             setWarehouseTaskButtonText(pendingWarehouseTaskName, loadingText.toString());
             handler.postDelayed(this, 500);
+        }
+    };
+    private final Runnable startupGoChargeRunnable = new Runnable() {
+        @Override
+        public void run() {
+            sendStartupGoChargeTask();
         }
     };
     private DestModel destModel=new DestModel();
@@ -1187,6 +1195,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 if (errorCode == SDK_INIT_SUCCESS) {
                     Log.d("routeNodes","SDK_INIT_SUCCESS:"+errorCode);
                     initNavManager();
+                    scheduleStartupGoChargeTask();
                     tip("SDK_INIT_SUCCESS");
                     PeanutRuntime.getInstance().start(new PeanutRuntime.Listener() {
                         @Override
@@ -1301,16 +1310,42 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     }
 
     private void sendGoChargeTask() {
+        sendGoChargeTask(false);
+    }
+
+    private void sendGoChargeTask(boolean startupAutoCharge) {
         try {
             JSONObject payload = new JSONObject();
             payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
             payload.put("task_id", GO_CHARGE_TASK_ID);
             payload.put("robot_task_id", GO_CHARGE_ROBOT_TASK_ID);
-            sendWarehouseTask("回充", payload.toString());
+            sendWarehouseTask("回充", payload.toString(), startupAutoCharge ? "回充发送完毕" : null);
         } catch (JSONException e) {
             Log.e(TAG, "创建回充指令失败", e);
             tip("回充指令创建失败");
         }
+    }
+
+    private void scheduleStartupGoChargeTask() {
+        if (startupGoChargeSent) {
+            return;
+        }
+        handler.removeCallbacks(startupGoChargeRunnable);
+        handler.postDelayed(startupGoChargeRunnable, STARTUP_GO_CHARGE_DELAY_MS);
+    }
+
+    private void sendStartupGoChargeTask() {
+        if (startupGoChargeSent) {
+            return;
+        }
+        if (warehouseTaskPending) {
+            Log.d(TAG, "skip startup go charge: warehouse task pending");
+            return;
+        }
+
+        startupGoChargeSent = true;
+        Log.d(TAG, "send startup go charge task");
+        sendGoChargeTask(true);
     }
 
     private void sendPatrolWarehouseTask() {
@@ -1342,6 +1377,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     }
 
     private void sendWarehouseTask(String taskName, String payload) {
+        sendWarehouseTask(taskName, payload, null);
+    }
+
+    private void sendWarehouseTask(String taskName, String payload, String successMessage) {
         if (warehouseTaskPending) {
             tip(pendingWarehouseTaskName + "请求发送中，请稍候");
             return;
@@ -1370,7 +1409,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             @Override
             public void onMessage(@NonNull WebSocket webSocket, String text) {
                 Log.d(TAG, taskName + "指令收到响应: " + text);
-                handleWarehouseTaskResponse(taskName, text);
+                handleWarehouseTaskResponse(taskName, text, successMessage);
                 webSocket.close(1000, taskName + " response received");
             }
 
@@ -1378,7 +1417,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 String text = bytes.utf8();
                 Log.d(TAG, taskName + "指令收到二进制响应: " + text);
-                handleWarehouseTaskResponse(taskName, text);
+                handleWarehouseTaskResponse(taskName, text, successMessage);
                 webSocket.close(1000, taskName + " response received");
             }
 
@@ -1410,6 +1449,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     }
 
     private void handleWarehouseTaskResponse(String taskName, String responseText) {
+        handleWarehouseTaskResponse(taskName, responseText, null);
+    }
+
+    private void handleWarehouseTaskResponse(String taskName, String responseText, String successMessage) {
         if (TextUtils.isEmpty(responseText)) {
             handleWarehouseTaskFailure(taskName, "接口返回为空");
             return;
@@ -1429,7 +1472,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             }
 
             if (accepted) {
-                completeWarehouseTask(taskName, taskName + "请求已受理：" + message);
+                completeWarehouseTask(taskName, TextUtils.isEmpty(successMessage) ? taskName + "请求已受理：" + message : successMessage);
             } else {
                 handleWarehouseTaskFailure(taskName, message);
             }

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/index.md","reason":"Verify the command-handling change against repository backend guidance."}
+{"file":".trellis/spec/guides/index.md","reason":"Check the startup flow for cross-flow side effects and duplicated command logic."}
