@@ -12,8 +12,8 @@ android {
         // applicationId "com.jdk.org"
         minSdk 23
         targetSdk 33
-        versionCode 13
-        versionName "1.0.12-beta.2"
+        versionCode 14
+        versionName "1.0.12-beta.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {

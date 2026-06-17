@@ -85,7 +85,6 @@ import com.yuandaima.peanutrobot.server.WebServer;
 import com.yuandaima.peanutrobot.server.WebSocketService;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
-import com.yuandaima.peanutrobot.util.ScrollAndSelectHelper;
 import com.yuandaima.peanutrobot.util.TtsUntil;
 
 import org.json.JSONException;
@@ -124,6 +123,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final int RECALL_ROBOT_TASK_ID = 4528;
     private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
     private static final long STARTUP_GO_CHARGE_DELAY_MS = 5000L;
+    private static final long WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS = 5000L;
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -149,9 +149,9 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private List<RouteNode> pointList=new ArrayList<>();
     private List<MyPoint> list = new ArrayList<>();
     private List<MediaModel> mediaModelList = new ArrayList<>();
+    private final List<DestModel.DataBean> selectedPointList = new ArrayList<>();
     private TtsUntil ttsUntil;
     private boolean isPermissionRequested;
-    private ScrollAndSelectHelper scrollHelper;
 
 
     private Runnable myRunnable;
@@ -209,6 +209,12 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         @Override
         public void run() {
             sendStartupGoChargeTask();
+        }
+    };
+    private final Runnable warehouseTaskStatusClearRunnable = new Runnable() {
+        @Override
+        public void run() {
+            mBinding.tvWarehouseTaskStatus.setText("");
         }
     };
     private DestModel destModel=new DestModel();
@@ -947,14 +953,15 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
             @Override
             public void onClick(int position,boolean isSelect) {
-                // 1. 平滑滚动到指定位置
-                //        mBinding.rvVerticalPoint.smoothScrollToPosition(position);
-                scrollHelper.smoothScrollToPositionAndSelect(position, isSelect,()->{
-                    View viewByPosition = verticalAdapter.getViewByPosition(position, R.id.tv_point);
-                    viewByPosition.setSelected(isSelect);
-                    verticalAdapter.notifyDataSetChanged();
-                });
-
+                if (position < 0 || position >= mAdapter.getData().size()) {
+                    return;
+                }
+                DestModel.DataBean point = mAdapter.getData().get(position);
+                if (isSelect) {
+                    addSelectedPoint(point);
+                } else {
+                    removeSelectedPoint(point);
+                }
             }
         });
 
@@ -962,9 +969,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         verticalAdapter.setOnClickItemListener(new OnItemClickListener() {
             @Override
             public void onClick(int position,boolean isSelect) {
-                View viewByPosition = mAdapter.getViewByPosition(position, R.id.tv_point);
-                viewByPosition.setSelected(isSelect);
-                verticalAdapter.notifyDataSetChanged();
+                removeSelectedPoint(position);
             }
         });
 
@@ -977,6 +982,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private void mInitView() {
         List<DestModel.DataBean> displayData = getDisplayPointData();
+        reconcileSelectedPoints(displayData);
         boolean hasPointData = !displayData.isEmpty();
         mBinding.tvPointEmpty.setVisibility(hasPointData ? View.GONE : View.VISIBLE);
 
@@ -990,21 +996,20 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         } else {
             replacePointData(mAdapter, displayData);
         }
+        mAdapter.setSelectedPoints(selectedPointList);
         // mediaAdapter=new MediaAdapter(mediaModelList,MainActivity.this);
         //  mAdapter= new PointAdapter(testData);
         if (verticalAdapter == null) {
-            verticalAdapter = new PointAdapter(new ArrayList<>(displayData));
+            verticalAdapter = new PointAdapter(new ArrayList<>(selectedPointList));
+            verticalAdapter.setCrossVisibility(true);
             LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this);
             linearLayoutManager.setOrientation(LinearLayoutManager.VERTICAL);
             mBinding.rvVerticalPoint.setLayoutManager(linearLayoutManager);
             mBinding.rvVerticalPoint.setAdapter(verticalAdapter);
         } else {
-            replacePointData(verticalAdapter, displayData);
+            replacePointData(verticalAdapter, selectedPointList);
         }
-        scrollHelper = new ScrollAndSelectHelper(
-                mBinding.rvVerticalPoint,
-                verticalAdapter
-        );
+        verticalAdapter.setSelectedPoints(selectedPointList);
         //    verticalAdapter= new PointAdapter(testData);
         mAdapter.setTtsUtil(ttsUntil);
     }
@@ -1096,6 +1101,84 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         adapter.notifyDataSetChanged();
     }
 
+    private void addSelectedPoint(DestModel.DataBean point) {
+        if (point == null || findSelectedPointIndex(point.getId()) >= 0) {
+            return;
+        }
+        selectedPointList.add(point);
+        refreshSelectedPointUi();
+    }
+
+    private void removeSelectedPoint(DestModel.DataBean point) {
+        if (point == null) {
+            return;
+        }
+        int selectedIndex = findSelectedPointIndex(point.getId());
+        if (selectedIndex >= 0) {
+            selectedPointList.remove(selectedIndex);
+            refreshSelectedPointUi();
+        }
+    }
+
+    private void removeSelectedPoint(int position) {
+        if (position < 0 || position >= selectedPointList.size()) {
+            return;
+        }
+        selectedPointList.remove(position);
+        refreshSelectedPointUi();
+    }
+
+    private int findSelectedPointIndex(int pointId) {
+        for (int i = 0; i < selectedPointList.size(); i++) {
+            DestModel.DataBean selectedPoint = selectedPointList.get(i);
+            if (selectedPoint != null && selectedPoint.getId() == pointId) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private DestModel.DataBean findPointById(List<DestModel.DataBean> pointData, int pointId) {
+        if (pointData == null) {
+            return null;
+        }
+        for (DestModel.DataBean point : pointData) {
+            if (point != null && point.getId() == pointId) {
+                return point;
+            }
+        }
+        return null;
+    }
+
+    private void reconcileSelectedPoints(List<DestModel.DataBean> displayData) {
+        if (selectedPointList.isEmpty()) {
+            return;
+        }
+        if (displayData == null || displayData.isEmpty()) {
+            selectedPointList.clear();
+            return;
+        }
+        for (int i = selectedPointList.size() - 1; i >= 0; i--) {
+            DestModel.DataBean selectedPoint = selectedPointList.get(i);
+            DestModel.DataBean latestPoint = selectedPoint == null ? null : findPointById(displayData, selectedPoint.getId());
+            if (latestPoint == null) {
+                selectedPointList.remove(i);
+            } else {
+                selectedPointList.set(i, latestPoint);
+            }
+        }
+    }
+
+    private void refreshSelectedPointUi() {
+        if (verticalAdapter != null) {
+            replacePointData(verticalAdapter, selectedPointList);
+            verticalAdapter.setSelectedPoints(selectedPointList);
+        }
+        if (mAdapter != null) {
+            mAdapter.setSelectedPoints(selectedPointList);
+        }
+    }
+
 
     private boolean initSDK(String ip) {
         try {
@@ -1165,6 +1248,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     protected void onDestroy() {
         handler.removeCallbacks(idleLockRunnable);
         handler.removeCallbacks(pointRefreshRetryRunnable);
+        handler.removeCallbacks(startupGoChargeRunnable);
+        handler.removeCallbacks(warehouseTaskStatusClearRunnable);
         PeanutSDK.getInstance().release();
         NavManager.getInstance().stop();
         NavManager.getInstance().release();
@@ -1250,44 +1335,19 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 tip("未获取到点位");
                 return;
             }
-            flag="";
-            mBinding.tvNavigate.setEnabled(false);
-            List<DestModel.DataBean> routeNodeList = mAdapter.getData();
-
-
-//            List<RouteNode> routeNodes = IntStream.range(0, routeNodeList.size())
-//                    .filter(i -> {
-//                        View view = mAdapter.getViewByPosition(i, R.id.tv_point);
-//                        return view != null && view.isSelected();
-//                    })
-//                    .mapToObj(i -> {
-//                        DestModel.DataBean dataBean = routeNodeList.get(i);
-//                        RouteNode routeNode = new RouteNode();
-//                        routeNode.setId(dataBean.getId());
-//                        routeNode.setName(dataBean.getName());
-//                        // routeNode.setOtherProperty(dataBean.getOtherProperty());
-//                        return routeNode;
-//                    })
-//                    .collect(Collectors.toList());
-
-
-            routeNodes = new ArrayList<>();
-
-            for (DestModel.DataBean dataBean : routeNodeList) {
-                int position = routeNodeList.indexOf(dataBean);
-                View view = mAdapter.getViewByPosition(position, R.id.tv_point);
-
-                if (view != null && view.isSelected()) {
-                    RouteNode routeNode = new RouteNode();
-                    routeNode.setId(dataBean.getId());
-                    routeNode.setName(dataBean.getName());
-                    routeNodes.add(routeNode);
-                }
-            }
-
-            if (routeNodes.isEmpty()){
+            if (selectedPointList.isEmpty()){
                 tip("请选择点位");
                 return;
+            }
+            flag="";
+            mBinding.tvNavigate.setEnabled(false);
+            routeNodes = new ArrayList<>();
+
+            for (DestModel.DataBean dataBean : selectedPointList) {
+                RouteNode routeNode = new RouteNode();
+                routeNode.setId(dataBean.getId());
+                routeNode.setName(dataBean.getName());
+                routeNodes.add(routeNode);
             }
             Log.d("navigatenext","routeNodes===="+new Gson().toJson(routeNodes)+",size="+routeNodes.size());
 //            RouteNode node = new RouteNode();
@@ -1492,6 +1552,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 mBinding.tvWarehouseTaskStatus.setText(message);
                 mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.blue));
                 tip(message);
+                scheduleWarehouseTaskStatusClear();
             }
         });
     }
@@ -1510,6 +1571,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 mBinding.tvWarehouseTaskStatus.setText(displayMessage);
                 mBinding.tvWarehouseTaskStatus.setTextColor(Color.RED);
                 tip(displayMessage);
+                scheduleWarehouseTaskStatusClear();
             }
         });
     }
@@ -1544,10 +1606,16 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                handler.removeCallbacks(warehouseTaskStatusClearRunnable);
                 mBinding.tvWarehouseTaskStatus.setText(message);
                 mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.grey_700));
             }
         });
+    }
+
+    private void scheduleWarehouseTaskStatusClear() {
+        handler.removeCallbacks(warehouseTaskStatusClearRunnable);
+        handler.postDelayed(warehouseTaskStatusClearRunnable, WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS);
     }
 
     private void closePendingWarehouseTaskWebSocket() {
