@@ -126,6 +126,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS = 5000L;
     private static final String ROOM_MAP_RESOURCE_NAME = "room_map";
     private static final String ROOM_MAP_RESOURCE_PATH_HINT = "app/src/main/res/drawable/room_map.png";
+    private static final String KEY_ROOM_MAP_ROTATION = "room_map_rotation";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -169,6 +170,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean startupGoChargeSent = false;
     private String pendingWarehouseTaskName = "";
     private WebSocket pendingWarehouseTaskWebSocket;
+    private int roomMapRotation = 0;
     private int warehouseTaskLoadingStep = 0;
     private int idleUnlockTapCount = 0;
     private long idleUnlockFirstTapTime = 0L;
@@ -952,6 +954,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvRecall.setOnClickListener(this);
         mBinding.tvShowRoomMap.setOnClickListener(this);
         mBinding.tvRoomMapClose.setOnClickListener(this);
+        mBinding.tvRoomMapRotate.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -1190,11 +1193,31 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             return;
         }
         mBinding.ivRoomMap.setImageResource(roomMapResId);
+        roomMapRotation = normalizeRoomMapRotation(MmkvUtils.decodeInt(KEY_ROOM_MAP_ROTATION, 0));
+        applyRoomMapRotation();
         mBinding.flRoomMapPreview.setVisibility(View.VISIBLE);
     }
 
     private void hideRoomMapPreview() {
         mBinding.flRoomMapPreview.setVisibility(View.GONE);
+    }
+
+    private void rotateRoomMapPreview() {
+        roomMapRotation = normalizeRoomMapRotation(roomMapRotation + 90);
+        MmkvUtils.encode(KEY_ROOM_MAP_ROTATION, roomMapRotation);
+        applyRoomMapRotation();
+    }
+
+    private void applyRoomMapRotation() {
+        mBinding.ivRoomMap.setRotation(roomMapRotation);
+    }
+
+    private int normalizeRoomMapRotation(int rotation) {
+        int normalizedRotation = rotation % 360;
+        if (normalizedRotation < 0) {
+            normalizedRotation += 360;
+        }
+        return normalizedRotation;
     }
 
 
@@ -1388,6 +1411,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             showRoomMapPreview();
         }else if (id==mBinding.tvRoomMapClose.getId()){
             hideRoomMapPreview();
+        }else if (id==mBinding.tvRoomMapRotate.getId()){
+            rotateRoomMapPreview();
         }
     }
 

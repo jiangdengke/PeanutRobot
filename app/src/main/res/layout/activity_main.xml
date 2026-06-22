@@ -292,6 +292,20 @@
             android:textColor="@color/white"
             android:textSize="32sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_room_map_rotate"
+            android:layout_width="120dp"
+            android:layout_height="64dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="24dp"
+            android:layout_marginEnd="104dp"
+            android:background="#99000000"
+            android:gravity="center"
+            android:text="旋转"
+            android:textColor="@color/white"
+            android:textSize="28sp"
+            android:textStyle="bold" />
     </FrameLayout>
 
     <FrameLayout
