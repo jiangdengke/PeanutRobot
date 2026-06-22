@@ -124,6 +124,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
     private static final long STARTUP_GO_CHARGE_DELAY_MS = 5000L;
     private static final long WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS = 5000L;
+    private static final String ROOM_MAP_RESOURCE_NAME = "room_map";
+    private static final String ROOM_MAP_RESOURCE_PATH_HINT = "app/src/main/res/drawable/room_map.png";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -948,6 +950,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
+        mBinding.tvShowRoomMap.setOnClickListener(this);
+        mBinding.tvRoomMapClose.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -1179,6 +1183,20 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         }
     }
 
+    private void showRoomMapPreview() {
+        int roomMapResId = getResources().getIdentifier(ROOM_MAP_RESOURCE_NAME, "drawable", getPackageName());
+        if (roomMapResId == 0) {
+            tip("请先放置图片：" + ROOM_MAP_RESOURCE_PATH_HINT);
+            return;
+        }
+        mBinding.ivRoomMap.setImageResource(roomMapResId);
+        mBinding.flRoomMapPreview.setVisibility(View.VISIBLE);
+    }
+
+    private void hideRoomMapPreview() {
+        mBinding.flRoomMapPreview.setVisibility(View.GONE);
+    }
+
 
     private boolean initSDK(String ip) {
         try {
@@ -1366,6 +1384,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             sendPatrolWarehouseTask();
         }else if (id==mBinding.tvRecall.getId()){
             sendRecallTask();
+        }else if (id==mBinding.tvShowRoomMap.getId()){
+            showRoomMapPreview();
+        }else if (id==mBinding.tvRoomMapClose.getId()){
+            hideRoomMapPreview();
         }
     }
 
