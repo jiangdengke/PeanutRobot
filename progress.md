@@ -97,3 +97,22 @@
 - `app/build.gradle`：更新版本号到 `1.0.12-beta.6`，`versionCode` 更新到 `17`。
 - `progress.md`：追加本轮发版记录。
 - 回滚方式：执行 `git restore app/build.gradle progress.md`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-07-05 - Task: 修复 Android Release 依赖源过滤并发布预发布版
+### What was done
+- 修复 Android Release 在 CI 中解析 Android Gradle Plugin 传递依赖失败的问题。
+- 允许 `com.google.testing.platform` 从 Google Maven 仓库解析，避免 `core-proto` 在配置阶段找不到。
+- 更新应用版本到 `1.0.12-beta.7`，用于重新触发预发布构建。
+- 补充 Android 发布构建依赖源过滤说明。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- `git diff --check -- "build.gradle" "app/build.gradle" "docs/android-release-build.md" "progress.md"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon --refresh-dependencies`：BUILD SUCCESSFUL。
+
+### Notes
+- `build.gradle`：补充 Google Maven 仓库 content 过滤规则，允许 `com.google.testing.platform` 依赖组。
+- `app/build.gradle`：更新版本号到 `1.0.12-beta.7`，`versionCode` 更新到 `18`。
+- `docs/android-release-build.md`：记录发布构建仓库过滤规则和刷新依赖验证方式。
+- `progress.md`：追加本轮 CI 修复和发版记录。
+- 回滚方式：执行 `git restore build.gradle app/build.gradle progress.md && rm -f docs/android-release-build.md`，如已提交则使用 `git revert <commit>` 回滚。
