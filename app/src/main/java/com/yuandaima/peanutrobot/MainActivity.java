@@ -127,6 +127,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final String ROOM_MAP_RESOURCE_NAME = "room_map";
     private static final String ROOM_MAP_RESOURCE_PATH_HINT = "app/src/main/res/drawable/room_map.png";
     private static final String KEY_ROOM_MAP_ROTATION = "room_map_rotation";
+    private static final String DEFAULT_DELIVERY_VOICE_URL = "http://192.168.112.194:9089/delivery.wav";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -1755,11 +1756,8 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
                 };
                 handler.postDelayed(myRunnable, 20000);
-                String voiceAddress = MmkvUtils.decodeString("save_voice_address");
-                Log.d("navigatenext","get_voice_address="+voiceAddress);
-                if (!TextUtils.isEmpty(voiceAddress)){
-                    mediaPlayerShow(voiceAddress);
-                }
+                Log.d("navigatenext","delivery_voice_address="+DEFAULT_DELIVERY_VOICE_URL);
+                mediaPlayerShow(DEFAULT_DELIVERY_VOICE_URL);
             }
 
             runOnUiThread(new Runnable() {

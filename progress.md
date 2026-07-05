@@ -65,3 +65,35 @@
 - `app/build.gradle`：更新版本号到 `1.0.12-beta.5`，`versionCode` 更新到 `16`。
 - `progress.md`：追加本轮发版记录。
 - 回滚方式：执行 `git restore app/build.gradle progress.md`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-06-22 - Task: 写死单点送餐到位语音地址
+### What was done
+- 将屏幕触发单点送餐到位后的默认播报音频固定为 `http://192.168.112.194:9089/delivery.wav`。
+- 到位后不再依赖提前调用 `/robot_task/save_voice_address` 保存语音地址。
+- 补充单点送餐到位语音说明文档。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- `git diff --check -- "app/build.gradle" "app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java" "docs/delivery-voice.md" "progress.md"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：新增默认到位播报音频地址，并在屏幕单点任务到达后直接播放该地址。
+- `docs/delivery-voice.md`：记录默认语音地址、触发条件和注意事项。
+- `progress.md`：追加本轮任务记录。
+- 回滚方式：执行 `git restore app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java progress.md && rm -f docs/delivery-voice.md`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-06-22 - Task: 发布单点送餐到位语音预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.6`，用于发布单点送餐到位默认语音功能。
+- 准备将固定到位语音地址和说明文档纳入本次预发布。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- `git diff --check -- "app/build.gradle" "app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java" "docs/delivery-voice.md" "progress.md"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/build.gradle`：更新版本号到 `1.0.12-beta.6`，`versionCode` 更新到 `17`。
+- `progress.md`：追加本轮发版记录。
+- 回滚方式：执行 `git restore app/build.gradle progress.md`，如已提交则使用 `git revert <commit>` 回滚。
