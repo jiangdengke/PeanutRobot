@@ -1,0 +1,1 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"本次重排现有控件，必须复用现有点位选择和按钮逻辑，避免复制业务实现。"}

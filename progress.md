@@ -116,3 +116,107 @@
 - `docs/android-release-build.md`：记录发布构建仓库过滤规则和刷新依赖验证方式。
 - `progress.md`：追加本轮 CI 修复和发版记录。
 - 回滚方式：执行 `git restore build.gradle app/build.gradle progress.md && rm -f docs/android-release-build.md`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-07-14 - Task: 绘制室内地形底图草稿
+### What was done
+- 根据机器人地图截图手工描绘简化室内地形底图，保留主要房间、通道和桌椅区域的相对布局。
+- 移除蓝色网格、红色扫描噪点和截图界面元素，为后续叠加可点击点位按钮提供干净底图。
+- 同时提供可继续编辑的 SVG 源文件和便于预览的 PNG 图片。
+
+### Testing
+- `xmllint --noout "docs/room-map-draft.svg"`：通过，SVG 语法有效。
+- `qlmanage -t -s 1600 -o "docs" "docs/room-map-draft.svg"`：成功生成 PNG 预览。
+- `ReadLints`：未发现新增 IDE 诊断。
+
+### Notes
+- `docs/room-map-draft.svg`：新增可编辑的室内地形矢量草稿。
+- `docs/room-map-draft.png`：新增地形草稿 PNG 预览图。
+- `progress.md`：追加本轮地图草稿交付记录。
+- 回滚方式：执行 `git restore progress.md && rm -f docs/room-map-draft.svg docs/room-map-draft.png`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-07-14 - Task: 使用 Android UI 绘制简化室内地形
+### What was done
+- 使用自定义 Android View 和 `Canvas` 绘制简化室内地形，不再依赖房间图片资源。
+- 保留建筑外轮廓、顶部异形区域、中间主通道、主要房间、房门和桌区，作为后续点位按钮的 UI 底层。
+- 将原“展示图片”入口调整为“查看地图”，保留全屏打开和关闭能力，移除图片旋转与资源检查逻辑。
+- 删除旧房间图片资源，并清理已被 UI 方案取代的 SVG/PNG 临时草稿。
+- 同步更新室内地形图使用说明。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- 搜索旧图片资源、图片旋转和旧绑定引用：无残留匹配。
+- `git diff --check -- "app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java" "app/src/main/res/layout/activity_main.xml" "docs/room-map-preview.md" "progress.md"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java`：新增简化室内地形自定义绘制控件。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：将地图预览切换为纯 UI 展示，并移除图片加载和旋转逻辑。
+- `app/src/main/res/layout/activity_main.xml`：使用地形控件替换图片控件，入口文案改为“查看地图”。
+- `app/src/main/res/drawable/room_map.png`：删除不再使用的旧房间图片资源。
+- `docs/room-map-preview.md`：更新为 Canvas 地形实现和当前能力说明。
+- `docs/room-map-draft.svg`、`docs/room-map-draft.png`：删除被 UI 方案取代的临时草稿。
+- `progress.md`：追加本轮 UI 地形实现记录。
+- 回滚方式：执行 `git restore app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml app/src/main/res/drawable/room_map.png docs/room-map-preview.md progress.md && rm -f app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-07-14 - Task: 调整室内地形为横屏朝右布局
+### What was done
+- 将简化室内地形整体顺时针旋转 90 度，使原地图顶部异形区域朝机器人屏幕右侧。
+- 按旋转后的横向设计尺寸重新计算缩放和居中位置，提升横屏空间利用率。
+- 允许地图遮罩仅在 Android Studio Design 模式中默认可见，实际 App 启动时仍保持隐藏。
+- 同步更新室内地形图横屏方向说明。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- `git diff --check -- "app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java" "app/src/main/res/layout/activity_main.xml" "docs/room-map-preview.md" "progress.md"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java`：新增横屏尺寸计算和顺时针 90 度绘制变换。
+- `app/src/main/res/layout/activity_main.xml`：增加仅用于 Android Studio 的地图预览可见配置。
+- `docs/room-map-preview.md`：补充地形在机器人横屏中朝右展示的说明。
+- `progress.md`：追加本轮横屏适配记录。
+- 回滚方式：执行 `git restore app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java app/src/main/res/layout/activity_main.xml docs/room-map-preview.md progress.md`，如已提交则使用 `git revert <commit>` 回滚。
+
+## 2026-07-14 - Task: 调整地图与操作按钮为横屏三栏布局
+### What was done
+- 将主界面调整为左侧点位、中间地图、右侧操作的横屏三栏常驻布局。
+- 中间地图区域约占屏幕宽度的三分之二，使用黑白平面图按原比例完整居中展示。
+- 左侧保留全部点位和已选点位队列，并将全部点位调整为适合窄栏的单列展示。
+- 右侧纵向保留立即出发、巡仓、回充、召回、刷新点位和锁屏等原有操作。
+- 移除不再需要的地图弹层、关闭入口和 Canvas 地形控件，不修改机器人通信和导航业务逻辑。
+- 同步更新室内地图布局说明和 Trellis 任务记录。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- 搜索旧地图弹层绑定和 `TerrainMapView` 源码引用：当前源码无残留匹配。
+- `git diff --check -- "app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java" "app/src/main/res/drawable/room_map.png" "app/src/main/res/layout/activity_main.xml" "docs/room-map-preview.md" ".trellis/tasks/07-14-map-control-layout/prd.md" ".trellis/tasks/07-14-map-control-layout/implement.jsonl" ".trellis/tasks/07-14-map-control-layout/check.jsonl"`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 未连接真实机器人进行视觉和触控验收，左右窄栏在目标设备上的文字与触控尺寸仍需现场确认。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：将全部点位改为单列，并清理旧地图弹层绑定和交互。
+- `app/src/main/res/drawable/room_map.png`：使用用户提供的黑白横版平面图作为常驻地图。
+- `app/src/main/res/layout/activity_main.xml`：重排为 `1/6 + 2/3 + 1/6` 三栏布局，并保留原业务控件 ID。
+- `app/src/main/java/com/yuandaima/peanutrobot/view/TerrainMapView.java`：删除被图片方案取代的未提交 Canvas 地形控件。
+- `docs/room-map-preview.md`：更新为图片常驻三栏布局和现有交互说明。
+- `.trellis/tasks/07-14-map-control-layout/prd.md`：记录本轮范围、决策和验收标准。
+- `.trellis/tasks/07-14-map-control-layout/implement.jsonl`：记录实施阶段需要遵守的复用规范。
+- `.trellis/tasks/07-14-map-control-layout/check.jsonl`：记录检查阶段需要遵守的复用规范。
+- `.trellis/tasks/07-14-map-control-layout/task.json`：记录任务状态和范围。
+- `progress.md`：追加本轮三栏地图布局记录。
+- 回滚点：本轮修改前的 IDE Local History；当前改动与前序未提交地图工作共享文件，不应直接执行整文件 `git restore`。如本轮后续单独提交，使用 `git revert <commit>` 回滚该提交。
+
+## 2026-07-14 - Task: 发布横屏三栏地图布局预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.8`，用于发布横屏三栏常驻地图布局。
+- 将黑白室内地图、点位选择区和右侧操作区纳入本次预发布。
+
+### Testing
+- `ReadLints`：未发现新增 IDE 诊断。
+- `git diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.8`，`versionCode` 更新为 `19`。
+- `progress.md`：追加本轮预发布记录。
+- 回滚方式：如本轮已提交，执行 `git revert <commit>`；如仅撤销版本号且尚未提交，恢复 `app/build.gradle` 中的 `versionCode 18` 和 `versionName "1.0.12-beta.7"`，并删除本节记录。

@@ -1,0 +1,1 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查布局调整是否保留原有 View ID 和业务绑定，且没有引入重复逻辑。"}

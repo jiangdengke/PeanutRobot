@@ -124,9 +124,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
     private static final long STARTUP_GO_CHARGE_DELAY_MS = 5000L;
     private static final long WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS = 5000L;
-    private static final String ROOM_MAP_RESOURCE_NAME = "room_map";
-    private static final String ROOM_MAP_RESOURCE_PATH_HINT = "app/src/main/res/drawable/room_map.png";
-    private static final String KEY_ROOM_MAP_ROTATION = "room_map_rotation";
     private static final String DEFAULT_DELIVERY_VOICE_URL = "http://192.168.112.194:9089/delivery.wav";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
@@ -171,7 +168,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean startupGoChargeSent = false;
     private String pendingWarehouseTaskName = "";
     private WebSocket pendingWarehouseTaskWebSocket;
-    private int roomMapRotation = 0;
     private int warehouseTaskLoadingStep = 0;
     private int idleUnlockTapCount = 0;
     private long idleUnlockFirstTapTime = 0L;
@@ -953,9 +949,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
-        mBinding.tvShowRoomMap.setOnClickListener(this);
-        mBinding.tvRoomMapClose.setOnClickListener(this);
-        mBinding.tvRoomMapRotate.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -998,7 +991,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         //pointList
         if (mAdapter == null) {
             mAdapter = new PointAdapter(new ArrayList<>(displayData));
-            GridLayoutManager gridLayoutManager = new GridLayoutManager(this, 5);
+            GridLayoutManager gridLayoutManager = new GridLayoutManager(this, 1);
             mBinding.rvPoint.setLayoutManager(gridLayoutManager);
             mBinding.rvPoint.setAdapter(mAdapter);
         } else {
@@ -1187,41 +1180,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         }
     }
 
-    private void showRoomMapPreview() {
-        int roomMapResId = getResources().getIdentifier(ROOM_MAP_RESOURCE_NAME, "drawable", getPackageName());
-        if (roomMapResId == 0) {
-            tip("请先放置图片：" + ROOM_MAP_RESOURCE_PATH_HINT);
-            return;
-        }
-        mBinding.ivRoomMap.setImageResource(roomMapResId);
-        roomMapRotation = normalizeRoomMapRotation(MmkvUtils.decodeInt(KEY_ROOM_MAP_ROTATION, 0));
-        applyRoomMapRotation();
-        mBinding.flRoomMapPreview.setVisibility(View.VISIBLE);
-    }
-
-    private void hideRoomMapPreview() {
-        mBinding.flRoomMapPreview.setVisibility(View.GONE);
-    }
-
-    private void rotateRoomMapPreview() {
-        roomMapRotation = normalizeRoomMapRotation(roomMapRotation + 90);
-        MmkvUtils.encode(KEY_ROOM_MAP_ROTATION, roomMapRotation);
-        applyRoomMapRotation();
-    }
-
-    private void applyRoomMapRotation() {
-        mBinding.ivRoomMap.setRotation(roomMapRotation);
-    }
-
-    private int normalizeRoomMapRotation(int rotation) {
-        int normalizedRotation = rotation % 360;
-        if (normalizedRotation < 0) {
-            normalizedRotation += 360;
-        }
-        return normalizedRotation;
-    }
-
-
     private boolean initSDK(String ip) {
         try {
             PeanutConfig.getConfig()
@@ -1408,12 +1366,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             sendPatrolWarehouseTask();
         }else if (id==mBinding.tvRecall.getId()){
             sendRecallTask();
-        }else if (id==mBinding.tvShowRoomMap.getId()){
-            showRoomMapPreview();
-        }else if (id==mBinding.tvRoomMapClose.getId()){
-            hideRoomMapPreview();
-        }else if (id==mBinding.tvRoomMapRotate.getId()){
-            rotateRoomMapPreview();
         }
     }
 
