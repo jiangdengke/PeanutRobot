@@ -220,3 +220,19 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.8`，`versionCode` 更新为 `19`。
 - `progress.md`：追加本轮预发布记录。
 - 回滚方式：如本轮已提交，执行 `git revert <commit>`；如仅撤销版本号且尚未提交，恢复 `app/build.gradle` 中的 `versionCode 18` 和 `versionName "1.0.12-beta.7"`，并删除本节记录。
+
+## 2026-07-14 - Task: 发布带点位标注的新室内地图预发布版
+### What was done
+- 替换主界面常驻室内地图，加入小屏右、小包右、大屏左、大屏后、吧台左、吧台右和补餐桌等点位标注。
+- 更新应用版本到 `1.0.12-beta.9`，用于在机器人横屏上验证新地图的清晰度和标注位置。
+
+### Testing
+- 检查图片元数据：PNG 格式，尺寸为 `1448 × 1086`。
+- `git diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+
+### Notes
+- `app/src/main/res/drawable/room_map.png`：替换为带红色点位标注的新室内地图。
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.9`，`versionCode` 更新为 `20`。
+- `progress.md`：追加本轮地图替换和预发布记录。
+- 回滚方式：如本轮已提交，执行 `git revert <commit>`；如尚未提交，恢复上一版地图，并将版本恢复为 `versionCode 19` 和 `versionName "1.0.12-beta.8"`。
