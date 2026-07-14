@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有点位模型、选择适配器和导航路线生成逻辑，避免建立重复状态源。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查点位点击、仓位绑定、刷新清理和导航路线之间的数据流保持一致。"}

@@ -70,12 +70,65 @@
                 android:layout_weight="1"
                 android:visibility="gone" />
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rv_vertical_point"
+            <TextView
+                android:id="@+id/tv_pending_point"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:gravity="center"
                 android:padding="4dp"
-                android:clipToPadding="false" />
+                android:text="待绑定：请先点击上方点位"
+                android:textColor="@color/grey_700"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_compartment_1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/textview_bg_selector"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:padding="4dp"
+                android:text="仓位 1&#10;未绑定&#10;先选点位，再点此绑定"
+                android:textColor="@color/grey_900"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_compartment_2"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/textview_bg_selector"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:padding="4dp"
+                android:text="仓位 2&#10;未绑定&#10;先选点位，再点此绑定"
+                android:textColor="@color/grey_900"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_compartment_3"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/textview_bg_selector"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:padding="4dp"
+                android:text="仓位 3&#10;未绑定&#10;先选点位，再点此绑定"
+                android:textColor="@color/grey_900"
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
         </androidx.appcompat.widget.LinearLayoutCompat>
 

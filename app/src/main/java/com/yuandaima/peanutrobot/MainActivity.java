@@ -46,7 +46,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
-import androidx.recyclerview.widget.LinearLayoutManager;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -112,6 +111,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long IDLE_LOCK_DELAY_MS = 60 * 1000L;
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
+    private static final int COMPARTMENT_COUNT = 3;
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
     private static final String WAREHOUSE_TASK_WS = "ws://192.168.112.194:9098";
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
@@ -145,12 +145,14 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
     private ActivityMainBinding mBinding;
-    private PointAdapter mAdapter,verticalAdapter;
+    private PointAdapter mAdapter;
     private MediaAdapter mediaAdapter;
     private List<RouteNode> pointList=new ArrayList<>();
     private List<MyPoint> list = new ArrayList<>();
     private List<MediaModel> mediaModelList = new ArrayList<>();
     private final List<DestModel.DataBean> selectedPointList = new ArrayList<>();
+    private final DestModel.DataBean[] compartmentPoints = new DestModel.DataBean[COMPARTMENT_COUNT];
+    private DestModel.DataBean pendingPoint;
     private TtsUntil ttsUntil;
     private boolean isPermissionRequested;
 
@@ -949,6 +951,9 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
+        mBinding.tvCompartment1.setOnClickListener(this);
+        mBinding.tvCompartment2.setOnClickListener(this);
+        mBinding.tvCompartment3.setOnClickListener(this);
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -958,32 +963,14 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                     return;
                 }
                 DestModel.DataBean point = mAdapter.getData().get(position);
-                if (isSelect) {
-                    addSelectedPoint(point);
-                } else {
-                    removeSelectedPoint(point);
-                }
+                handlePointClick(point);
             }
         });
-
-
-        verticalAdapter.setOnClickItemListener(new OnItemClickListener() {
-            @Override
-            public void onClick(int position,boolean isSelect) {
-                removeSelectedPoint(position);
-            }
-        });
-
-
-
-
-
     }
 
 
     private void mInitView() {
         List<DestModel.DataBean> displayData = getDisplayPointData();
-        reconcileSelectedPoints(displayData);
         boolean hasPointData = !displayData.isEmpty();
         mBinding.tvPointEmpty.setVisibility(hasPointData ? View.GONE : View.VISIBLE);
 
@@ -997,21 +984,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         } else {
             replacePointData(mAdapter, displayData);
         }
-        mAdapter.setSelectedPoints(selectedPointList);
+        mAdapter.setSelectedPoints(getHighlightedPoints());
         // mediaAdapter=new MediaAdapter(mediaModelList,MainActivity.this);
         //  mAdapter= new PointAdapter(testData);
-        if (verticalAdapter == null) {
-            verticalAdapter = new PointAdapter(new ArrayList<>(selectedPointList));
-            verticalAdapter.setCrossVisibility(true);
-            LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this);
-            linearLayoutManager.setOrientation(LinearLayoutManager.VERTICAL);
-            mBinding.rvVerticalPoint.setLayoutManager(linearLayoutManager);
-            mBinding.rvVerticalPoint.setAdapter(verticalAdapter);
-        } else {
-            replacePointData(verticalAdapter, selectedPointList);
-        }
-        verticalAdapter.setSelectedPoints(selectedPointList);
-        //    verticalAdapter= new PointAdapter(testData);
+        updateCompartmentUi();
         mAdapter.setTtsUtil(ttsUntil);
     }
 
@@ -1063,6 +1039,7 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         List<DestModel.DataBean> remotePointData = parseRemotePointData(destList);
         if (!remotePointData.isEmpty()) {
             destModel.setData(remotePointData);
+            reconcilePointBindings(remotePointData);
             mBinding.tvPointEmpty.setText("未获取到点位");
             pointAutoRefreshActive = false;
             handler.removeCallbacks(pointRefreshRetryRunnable);
@@ -1070,7 +1047,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 tip("点位已刷新：" + remotePointData.size() + "个");
             }
         } else {
-            destModel.setData(new ArrayList<>());
             mBinding.tvPointEmpty.setText("未获取到点位");
             if (manualRefresh) {
                 tip("未获取到点位");
@@ -1102,31 +1078,62 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         adapter.notifyDataSetChanged();
     }
 
-    private void addSelectedPoint(DestModel.DataBean point) {
-        if (point == null || findSelectedPointIndex(point.getId()) >= 0) {
-            return;
-        }
-        selectedPointList.add(point);
-        refreshSelectedPointUi();
-    }
-
-    private void removeSelectedPoint(DestModel.DataBean point) {
+    private void handlePointClick(DestModel.DataBean point) {
         if (point == null) {
             return;
         }
-        int selectedIndex = findSelectedPointIndex(point.getId());
-        if (selectedIndex >= 0) {
-            selectedPointList.remove(selectedIndex);
-            refreshSelectedPointUi();
-        }
-    }
-
-    private void removeSelectedPoint(int position) {
-        if (position < 0 || position >= selectedPointList.size()) {
+        if (findSelectedPointIndex(point.getId()) >= 0) {
+            tip("该点位已绑定，请点击对应仓位清空");
+            refreshPointBindingUi();
             return;
         }
-        selectedPointList.remove(position);
-        refreshSelectedPointUi();
+        if (pendingPoint != null && pendingPoint.getId() == point.getId()) {
+            pendingPoint = null;
+            refreshPointBindingUi();
+            return;
+        }
+        if (selectedPointList.size() >= COMPARTMENT_COUNT) {
+            tip("最多绑定三个点位");
+            refreshPointBindingUi();
+            return;
+        }
+        pendingPoint = point;
+        refreshPointBindingUi();
+    }
+
+    private void handleCompartmentClick(int compartmentIndex) {
+        if (compartmentIndex < 0 || compartmentIndex >= compartmentPoints.length) {
+            return;
+        }
+
+        DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
+        if (boundPoint != null) {
+            if (pendingPoint != null) {
+                tip("该仓位已占用，请先清空再绑定");
+                refreshPointBindingUi();
+                return;
+            }
+            compartmentPoints[compartmentIndex] = null;
+            removeSelectedPointById(boundPoint.getId());
+            refreshPointBindingUi();
+            return;
+        }
+
+        if (pendingPoint == null) {
+            tip("请先选择待绑定点位");
+            return;
+        }
+        compartmentPoints[compartmentIndex] = pendingPoint;
+        selectedPointList.add(pendingPoint);
+        pendingPoint = null;
+        refreshPointBindingUi();
+    }
+
+    private void removeSelectedPointById(int pointId) {
+        int selectedIndex = findSelectedPointIndex(pointId);
+        if (selectedIndex >= 0) {
+            selectedPointList.remove(selectedIndex);
+        }
     }
 
     private int findSelectedPointIndex(int pointId) {
@@ -1151,33 +1158,94 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         return null;
     }
 
-    private void reconcileSelectedPoints(List<DestModel.DataBean> displayData) {
-        if (selectedPointList.isEmpty()) {
-            return;
-        }
-        if (displayData == null || displayData.isEmpty()) {
-            selectedPointList.clear();
-            return;
-        }
-        for (int i = selectedPointList.size() - 1; i >= 0; i--) {
-            DestModel.DataBean selectedPoint = selectedPointList.get(i);
-            DestModel.DataBean latestPoint = selectedPoint == null ? null : findPointById(displayData, selectedPoint.getId());
-            if (latestPoint == null) {
-                selectedPointList.remove(i);
-            } else {
-                selectedPointList.set(i, latestPoint);
+    private void reconcilePointBindings(List<DestModel.DataBean> displayData) {
+        for (int compartmentIndex = 0; compartmentIndex < compartmentPoints.length; compartmentIndex++) {
+            DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
+            if (boundPoint == null) {
+                continue;
             }
+            DestModel.DataBean latestPoint = findPointById(displayData, boundPoint.getId());
+            if (latestPoint == null) {
+                compartmentPoints[compartmentIndex] = null;
+                removeSelectedPointById(boundPoint.getId());
+            } else {
+                compartmentPoints[compartmentIndex] = latestPoint;
+            }
+        }
+
+        for (int selectedIndex = selectedPointList.size() - 1; selectedIndex >= 0; selectedIndex--) {
+            DestModel.DataBean selectedPoint = selectedPointList.get(selectedIndex);
+            DestModel.DataBean latestPoint = selectedPoint == null
+                    ? null
+                    : findPointById(displayData, selectedPoint.getId());
+            if (latestPoint == null || findCompartmentIndexByPointId(latestPoint.getId()) < 0) {
+                selectedPointList.remove(selectedIndex);
+            } else {
+                selectedPointList.set(selectedIndex, latestPoint);
+            }
+        }
+
+        if (pendingPoint != null) {
+            pendingPoint = findPointById(displayData, pendingPoint.getId());
         }
     }
 
-    private void refreshSelectedPointUi() {
-        if (verticalAdapter != null) {
-            replacePointData(verticalAdapter, selectedPointList);
-            verticalAdapter.setSelectedPoints(selectedPointList);
+    private int findCompartmentIndexByPointId(int pointId) {
+        for (int compartmentIndex = 0; compartmentIndex < compartmentPoints.length; compartmentIndex++) {
+            DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
+            if (boundPoint != null && boundPoint.getId() == pointId) {
+                return compartmentIndex;
+            }
         }
+        return -1;
+    }
+
+    private List<DestModel.DataBean> getHighlightedPoints() {
+        List<DestModel.DataBean> highlightedPoints = new ArrayList<>(selectedPointList);
+        if (pendingPoint != null) {
+            highlightedPoints.add(pendingPoint);
+        }
+        return highlightedPoints;
+    }
+
+    private void refreshPointBindingUi() {
         if (mAdapter != null) {
-            mAdapter.setSelectedPoints(selectedPointList);
+            mAdapter.setSelectedPoints(getHighlightedPoints());
         }
+        updateCompartmentUi();
+    }
+
+    private void updateCompartmentUi() {
+        if (mBinding == null) {
+            return;
+        }
+        if (pendingPoint == null) {
+            mBinding.tvPendingPoint.setText("待绑定：请先点击上方点位");
+        } else {
+            mBinding.tvPendingPoint.setText("待绑定：" + getPointDisplayName(pendingPoint)
+                    + "\n请选择下方空仓位");
+        }
+        updateCompartmentCard(mBinding.tvCompartment1, 0);
+        updateCompartmentCard(mBinding.tvCompartment2, 1);
+        updateCompartmentCard(mBinding.tvCompartment3, 2);
+    }
+
+    private void updateCompartmentCard(TextView compartmentView, int compartmentIndex) {
+        String compartmentName = "仓位 " + (compartmentIndex + 1);
+        DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
+        if (boundPoint != null) {
+            compartmentView.setText(compartmentName + "\n点位：" + getPointDisplayName(boundPoint)
+                    + "\n无待绑定时点击清空");
+        } else if (pendingPoint != null) {
+            compartmentView.setText(compartmentName + "\n未绑定\n点击绑定："
+                    + getPointDisplayName(pendingPoint));
+        } else {
+            compartmentView.setText(compartmentName + "\n未绑定\n先选点位，再点此绑定");
+        }
+    }
+
+    private String getPointDisplayName(DestModel.DataBean point) {
+        return TextUtils.isEmpty(point.getName()) ? String.valueOf(point.getId()) : point.getName();
     }
 
     private boolean initSDK(String ip) {
@@ -1330,13 +1398,19 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     public void onClick(View v) {
         int id = v.getId();
 
-        if (id==mBinding.tvNavigate.getId()){
-            if (mAdapter == null || mAdapter.getData().isEmpty()) {
-                tip("未获取到点位");
+        if (id == mBinding.tvCompartment1.getId()) {
+            handleCompartmentClick(0);
+        } else if (id == mBinding.tvCompartment2.getId()) {
+            handleCompartmentClick(1);
+        } else if (id == mBinding.tvCompartment3.getId()) {
+            handleCompartmentClick(2);
+        } else if (id==mBinding.tvNavigate.getId()){
+            if (selectedPointList.isEmpty()){
+                tip("请先绑定点位到仓位");
                 return;
             }
-            if (selectedPointList.isEmpty()){
-                tip("请选择点位");
+            if (pendingPoint != null) {
+                tip("请先将待绑定点位放入仓位，或取消选择");
                 return;
             }
             flag="";

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"确认仓位实现没有复制点位结构或绕开现有导航入口。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"验证 UI 选择状态、仓位状态和最终导航路线在新增、清空、刷新时保持一致。"}

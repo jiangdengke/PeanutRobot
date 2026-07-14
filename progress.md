@@ -236,3 +236,47 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.9`，`versionCode` 更新为 `20`。
 - `progress.md`：追加本轮地图替换和预发布记录。
 - 回滚方式：如本轮已提交，执行 `git revert <commit>`；如尚未提交，恢复上一版地图，并将版本恢复为 `versionCode 19` 和 `versionName "1.0.12-beta.8"`。
+
+## 2026-07-14 - Task: 增加三仓位点位绑定并记录到位等待方案
+### What was done
+- 在主界面增加仓位 1、仓位 2、仓位 3，并实现“先选点位、再点仓位”的绑定交互。
+- 限制一次最多绑定三个不同点位，禁止点位重复绑定和已占用仓位直接覆盖。
+- 屏幕导航只使用已绑定点位，并按绑定先后生成路线；无绑定或仍有待绑定点位时禁止立即出发。
+- 清空仓位时同步删除对应路线点位；成功获取非空点位快照后，按点位 ID 更新或清理绑定。
+- 临时未获取到点位、解析失败或返回空列表时保留当前点位、仓位、路线和待绑定状态，避免自动重试期间丢失任务配置。
+- 记录后续逐点到位 HTTP 上报、等待五分钟、继续下一点或最终召回的业务方案，本轮未修改相关导航和通信逻辑。
+
+### Testing
+- `ReadLints`：`MainActivity.java` 和 `activity_main.xml` 未发现新增 IDE 诊断。
+- `git diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 静态复核点位刷新分支：仅非空新快照执行绑定对账，空结果保留上一份成功快照并继续现有重试。
+- 未连接真实机器人，仓位触控、点位刷新及实际导航顺序仍需在目标设备上联调确认。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加三仓位绑定、待绑定状态、绑定顺序路线、出发校验和空刷新状态保护。
+- `app/src/main/res/layout/activity_main.xml`：将左侧下半区调整为待绑定提示和三个固定仓位卡片。
+- `docs/compartment-point-binding.md`：记录三仓位绑定交互、约束、刷新语义和导航顺序。
+- `docs/navigation-arrival-waiting.md`：记录后续逐点到位上报、五分钟等待、继续下一点和最终召回方案。
+- `.trellis/tasks/07-14-compartment-point-binding/task.json`：记录 Trellis 任务状态和基础分支。
+- `.trellis/tasks/07-14-compartment-point-binding/prd.md`：记录需求决策、边界和验收标准。
+- `.trellis/tasks/07-14-compartment-point-binding/implement.jsonl`：记录实施阶段使用的复用和跨层规范。
+- `.trellis/tasks/07-14-compartment-point-binding/check.jsonl`：记录检查阶段使用的复用和跨层规范。
+- `progress.md`：追加本轮实现和验证记录。
+- 回滚点：本轮开始前的 `v1.0.12-beta.9` 提交 `837221c`；如本轮后续单独提交，使用 `git revert <commit>` 回滚该提交。
+
+## 2026-07-14 - Task: 发布三仓位点位绑定预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.10`，用于发布三仓位点位绑定、最多三点限制和绑定顺序导航能力。
+- 将待绑定点位出发拦截、临时空刷新状态保护和相关使用说明纳入本次预发布。
+
+### Testing
+- `ReadLints`：`MainActivity.java` 和 `activity_main.xml` 未发现新增 IDE 诊断。
+- `git diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 未连接真实机器人，三仓位触控、点位刷新及实际导航顺序仍需在目标设备上验收。
+
+### Notes
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.10`，`versionCode` 更新为 `21`。
+- `progress.md`：追加本轮预发布记录。
+- 回滚方式：如本轮已提交，执行 `git revert <commit>`；如尚未提交，仅恢复 `app/build.gradle` 中的 `versionCode 20` 和 `versionName "1.0.12-beta.9"`，并删除本节记录。
