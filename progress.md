@@ -280,3 +280,75 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.10`，`versionCode` 更新为 `21`。
 - `progress.md`：追加本轮预发布记录。
 - 回滚方式：如本轮已提交，执行 `git revert <commit>`；如尚未提交，仅恢复 `app/build.gradle` 中的 `versionCode 20` 和 `versionName "1.0.12-beta.9"`，并删除本节记录。
+
+## 2026-07-15 - Task: 实现到位上报与取餐等待推进
+### What was done
+- 屏幕仓位任务到达每个点位后，异步向固定地址 `http://192.168.112.194:9088/nav_arrive` 上报点位名称和仓位号。
+- 新增独立的 `9088/pickup_status` HTTP 服务，仅接受 `POST application/json` 和布尔值 `pickup_status: true`。
+- 每个点位到达后原地等待，pickup 成功或五分钟超时只消费当前等待一次；中间点继续下一点，最后一点调用现有 WebSocket 召回。
+- 将屏幕仓位路线拆成逐点 SDK 导航会话，并使用任务代次、会话代次和 `STATE_RUNNING` 导航腿门控隔离停止、抢占或上一点产生的迟到回调。
+- 到位 HTTP Call 的登记、清理和取消与等待代次使用同一同步边界，避免任务取消后继续发送旧到位请求。
+- 有效上游 `/robot_task/send_point` 保持完整路线语义；无效 JSON、空路线或包含空节点的路线在抢占前被拒绝。
+- 移除原屏幕单点到达后等待 20 秒再追加固定“出餐口”的旧逻辑，并补充 Activity 销毁后的服务、回调和网络资源清理。
+
+### Testing
+- `ReadLints`：`MainActivity.java`、`NavManager.java` 和 `PickupStatusServer.java` 未发现新增 IDE 诊断。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过；`NavManager.java` 保留仓库原有 CRLF 行尾。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 4 项有效。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- `./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon`：测试与构建任务完成，但项目级 `lintDebug` 被既有基线阻断，报告为 5 个错误和 156 个警告，包含 API 23/24 `StorageVolume` 兼容、Android 13 通知权限和既有 URI flag 问题；这些位置不属于本轮到位等待改动。
+- 独立竞态复核：未发现实现级阻塞；任务/会话归属、导航腿门控、pickup 与超时一次性消费、HTTP Call 取消和服务生命周期逻辑一致。
+- 未连接真实机器人；多点 pickup、五分钟超时、上游抢占和 Activity 销毁时序仍需在目标设备上完成集成验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加到位等待状态机、任务与会话校验、逐腿导航、到位 HTTP 上报、任务抢占和生命周期清理。
+- `app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java`：增加 SDK 导航会话代次和带会话标识的回调转发，丢弃已释放会话的迟到事件。
+- `app/src/main/java/com/yuandaima/peanutrobot/server/PickupStatusServer.java`：新增 `9088/pickup_status` 服务及方法、路径、媒体类型和 JSON 字段校验。
+- `docs/navigation-arrival-waiting.md`：记录 HTTP 契约、五分钟推进、导航事件隔离、任务抢占和协议限制。
+- `docs/compartment-point-binding.md`：关联仓位绑定与到位等待流程。
+- `.trellis/spec/backend/navigation-arrival-contract.md`：沉淀固定 HTTP 契约、校验矩阵、等待归属和 SDK 会话隔离规范。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/`：记录需求、上下文、验收标准和任务状态。
+- 已知限制：`pickup_status` 不携带任务、点位或仓位标识，App 无法识别恰好落入下一等待阶段的上一点迟到回调；需要上游协议增加关联字段才能彻底消除。
+- 回滚方式：尚未提交时恢复 `MainActivity.java`、`NavManager.java`、两份流程文档和 `progress.md`，删除新增的 `PickupStatusServer.java` 与本 Trellis 任务目录；如后续形成独立提交，使用 `git revert <commit>` 回滚。
+
+## 2026-07-15 - Task: 增加左栏配送进度界面
+### What was done
+- 在主界面左栏增加“点位选择”和“配送进度”切换，保留中间地图和右侧操作区原布局职责。
+- 屏幕仓位任务成功出发后自动切换到配送进度，并使用出发时的点位名称、仓位和绑定顺序生成独立展示快照。
+- 展示全部路线点位的等待配送、正在前往、等待取餐、已完成取餐、等待超时和配送已取消状态。
+- 当前点到达后显示五分钟倒计时；pickup 和超时继续复用现有一次性等待完成路径，未修改 HTTP、导航会话或召回协议。
+- 中间点完成等待后将下一点切换为正在前往；最后一点完成后保留最终结果并显示已开始召回。
+- 配送期间拦截点位选择、仓位绑定和手动点位刷新，并用只读提示和半透明状态区分；完成或取消后恢复编辑。
+- 手动回充、巡仓、召回或有效上游任务抢占时保留本次快照，并将未完成点位标记为配送已取消。
+
+### Testing
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 静态复核：配送进度只读取出发快照；倒计时在 pickup、超时、抢占和 Activity 销毁路径停止；状态展示未改变既有任务/会话代次校验和路线推进条件。
+- 未连接真实机器人；目标横屏上的文字密度、标签触控、五分钟实时时序和多点配送状态仍需现场验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加配送快照、状态卡片、倒计时、标签切换、只读拦截及完成/取消结果保留。
+- `app/src/main/res/layout/activity_main.xml`：将左栏重组为双标签内容区，并增加配送进度滚动容器。
+- `docs/compartment-point-binding.md`：补充配送进度界面、状态语义、快照和只读规则。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：增加配送进度 UI 扩展需求与验收标准。
+- `progress.md`：追加本轮实现和验证记录。
+- 回滚点：使用 IDE Local History 恢复到本轮首次修改 `activity_main.xml` 之前；`MainActivity.java` 与未提交的到位等待实现共享文件，禁止直接执行整文件 `git restore`。如本轮后续形成独立提交，执行 `git revert <commit>` 回滚该提交。
+
+## 2026-07-15 - Task: 发布到位等待与配送进度预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.11`，`versionCode` 更新为 `22`。
+- 将逐点到位上报、取餐等待、五分钟超时推进、导航会话隔离和左栏配送进度界面纳入本次预发布。
+- 准备通过 annotated tag `v1.0.12-beta.11` 触发 Android Release 工作流并生成 GitHub 预发布版本。
+
+### Testing
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`：BUILD SUCCESSFUL。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML 和重复权限声明警告，没有新增编译错误。
+- 未连接真实机器人；多点配送、pickup、完整五分钟超时和目标横屏视觉效果仍需现场验收。
+
+### Notes
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.11`，`versionCode` 更新为 `22`。
+- `progress.md`：追加本轮预发布记录。
+- 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。

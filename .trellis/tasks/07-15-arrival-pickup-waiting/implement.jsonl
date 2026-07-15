@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有 NanoHTTPD、OkHttp、导航推进和召回入口，避免新增重复通信与路线状态。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对到位事件、HTTP 上报、pickup 回调、等待计时与导航推进之间的完整数据流。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"约束 HTTP 请求失败、无效 pickup 请求和服务启动失败的处理边界。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"保持到位上报、等待开始结束和 pickup 消费过程具备可联调日志。"}
+{"file": ".trellis/spec/backend/navigation-arrival-contract.md", "reason": "Apply the fixed HTTP contracts, wait ownership, and navigation session isolation rules."}

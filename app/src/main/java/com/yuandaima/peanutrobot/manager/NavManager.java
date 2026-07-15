@@ -13,12 +13,25 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 
 public class NavManager implements Navigation.Listener {
+  public interface SessionNavigationListener {
+    void onSessionStateChanged(int sessionGeneration, int state, int schedule);
+
+    void onSessionRoutePrepared(int sessionGeneration, RouteNode... routeNodes);
+
+    void onSessionError(int sessionGeneration, int code);
+  }
+
   private static final String TAG = "NavManager";
   private static volatile NavManager mInstance;
   private List<RouteNode> nodeList = new ArrayList<>();
   private List<Navigation.Listener> listeners = new CopyOnWriteArrayList<>();
   private PeanutNavigation mPeanutNavigation;
   private List<MyPoint> targets = new ArrayList<>();
+  private int blockTimeout;
+  private int repeatCount;
+  private boolean arrivalEnabled;
+  private boolean initialized;
+  private volatile int navigationSessionGeneration;
 
   private NavManager() {
   }
@@ -26,7 +39,9 @@ public class NavManager implements Navigation.Listener {
   public static NavManager getInstance() {
     if (mInstance == null) {
       synchronized (NavManager.class) {
-        mInstance = new NavManager();
+        if (mInstance == null) {
+          mInstance = new NavManager();
+        }
       }
     }
     return mInstance;
@@ -47,17 +62,136 @@ public class NavManager implements Navigation.Listener {
   public void init(Navigation.Listener listener, int timeOut, int repeatTime, boolean arrivalEnable) {
     listeners.clear();
     setListener(listener);
+    blockTimeout = timeOut;
+    repeatCount = repeatTime;
+    arrivalEnabled = arrivalEnable;
+    initialized = true;
     if (mPeanutNavigation == null) {
-
-      PeanutNavigation.Builder builder = new PeanutNavigation.Builder()
-          .setListener(this)
-          .enableDefaultArrival(arrivalEnable)
-          .setRepeatCount(repeatTime)
-          .setBlockingTimeOut(timeOut);
-
-
-      mPeanutNavigation = builder.build();
+      createNavigationSession(repeatCount);
       Log.d(TAG, "init , mPeanutNavigation init  ");
+    }
+  }
+
+  public int recreateNavigationSession(int sessionRepeatCount) {
+    if (!initialized) {
+      throw new IllegalStateException("NavManager must be initialized before creating a session");
+    }
+    navigationSessionGeneration++;
+    PeanutNavigation oldNavigation = mPeanutNavigation;
+    mPeanutNavigation = null;
+    if (oldNavigation != null) {
+      oldNavigation.release();
+    }
+    createNavigationSession(sessionRepeatCount);
+    return navigationSessionGeneration;
+  }
+
+  public int getRepeatCount() {
+    return repeatCount;
+  }
+
+  public int getNavigationSessionGeneration() {
+    return navigationSessionGeneration;
+  }
+
+  private void createNavigationSession(int sessionRepeatCount) {
+    int sessionGeneration = ++navigationSessionGeneration;
+    PeanutNavigation.Builder builder = new PeanutNavigation.Builder()
+        .setListener(new SdkSessionNavigationListener(sessionGeneration))
+        .enableDefaultArrival(arrivalEnabled)
+        .setRepeatCount(sessionRepeatCount)
+        .setBlockingTimeOut(blockTimeout);
+    mPeanutNavigation = builder.build();
+  }
+
+  private boolean isCurrentSession(int sessionGeneration) {
+    return sessionGeneration == navigationSessionGeneration;
+  }
+
+  private final class SdkSessionNavigationListener implements Navigation.Listener {
+    private final int sessionGeneration;
+
+    private SdkSessionNavigationListener(int sessionGeneration) {
+      this.sessionGeneration = sessionGeneration;
+    }
+
+    @Override
+    public void onStateChanged(int state, int schedule) {
+      if (isCurrentSession(sessionGeneration)) {
+        dispatchSessionStateChanged(sessionGeneration, state, schedule);
+      }
+    }
+
+    @Override
+    public void onRouteNode(int index, RouteNode routeNode) {
+      if (isCurrentSession(sessionGeneration)) {
+        NavManager.this.onRouteNode(index, routeNode);
+      }
+    }
+
+    @Override
+    public void onRoutePrepared(RouteNode... routeNodes) {
+      if (isCurrentSession(sessionGeneration)) {
+        dispatchSessionRoutePrepared(sessionGeneration, routeNodes);
+      }
+    }
+
+    @Override
+    public void onDistanceChanged(float distance) {
+      if (isCurrentSession(sessionGeneration)) {
+        NavManager.this.onDistanceChanged(distance);
+      }
+    }
+
+    @Override
+    public void onError(int code) {
+      if (isCurrentSession(sessionGeneration)) {
+        dispatchSessionError(sessionGeneration, code);
+      }
+    }
+
+    @Override
+    public void onEvent(int event) {
+      if (isCurrentSession(sessionGeneration)) {
+        NavManager.this.onEvent(event);
+      }
+    }
+  }
+
+  private void dispatchSessionStateChanged(int sessionGeneration, int state, int schedule) {
+    for (Navigation.Listener listener : listeners) {
+      if (listener instanceof SessionNavigationListener) {
+        ((SessionNavigationListener) listener).onSessionStateChanged(
+            sessionGeneration,
+            state,
+            schedule
+        );
+      } else if (listener != null) {
+        listener.onStateChanged(state, schedule);
+      }
+    }
+  }
+
+  private void dispatchSessionRoutePrepared(int sessionGeneration, RouteNode... routeNodes) {
+    for (Navigation.Listener listener : listeners) {
+      if (listener instanceof SessionNavigationListener) {
+        ((SessionNavigationListener) listener).onSessionRoutePrepared(
+            sessionGeneration,
+            routeNodes
+        );
+      } else if (listener != null) {
+        listener.onRoutePrepared(routeNodes);
+      }
+    }
+  }
+
+  private void dispatchSessionError(int sessionGeneration, int code) {
+    for (Navigation.Listener listener : listeners) {
+      if (listener instanceof SessionNavigationListener) {
+        ((SessionNavigationListener) listener).onSessionError(sessionGeneration, code);
+      } else if (listener != null) {
+        listener.onError(code);
+      }
     }
   }
 
@@ -169,9 +303,12 @@ public class NavManager implements Navigation.Listener {
   public void release() {
     targets.clear();
     listeners.clear();
+    navigationSessionGeneration++;
     if (mPeanutNavigation != null) {
       mPeanutNavigation.release();
+      mPeanutNavigation = null;
     }
+    initialized = false;
     mInstance = null;
   }
 

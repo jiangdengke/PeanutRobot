@@ -19,6 +19,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.Settings;
@@ -80,6 +81,7 @@ import com.yuandaima.peanutrobot.manager.NavManager;
 import com.yuandaima.peanutrobot.manager.USBCameraManager;
 import com.yuandaima.peanutrobot.manager.WebSocketManager;
 import com.yuandaima.peanutrobot.presentation.PresentationCoucou;
+import com.yuandaima.peanutrobot.server.PickupStatusServer;
 import com.yuandaima.peanutrobot.server.WebServer;
 import com.yuandaima.peanutrobot.server.WebSocketService;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
@@ -93,18 +95,26 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import fi.iki.elonen.NanoHTTPD;
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 
-public class MainActivity extends AppCompatActivity implements  View.OnClickListener, Navigation.Listener{
+public class MainActivity extends AppCompatActivity implements View.OnClickListener,
+        Navigation.Listener, NavManager.SessionNavigationListener {
     private String TAG="MainActivity===";
     private static final int ARRIVE_STAY_DURATION = 3000;
     private static final int DEFAULT_NAVIGATION_SPEED = 30;
@@ -112,6 +122,18 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
     private static final int COMPARTMENT_COUNT = 3;
+    private static final int PICKUP_STATUS_SERVER_PORT = 9088;
+    private static final long ARRIVAL_WAIT_TIMEOUT_MS = 5 * 60 * 1000L;
+    private static final long DELIVERY_COUNTDOWN_UPDATE_INTERVAL_MS = 1000L;
+    private static final String DELIVERY_STATUS_QUEUED = "等待配送";
+    private static final String DELIVERY_STATUS_TRAVELING = "正在前往";
+    private static final String DELIVERY_STATUS_WAITING = "等待取餐";
+    private static final String DELIVERY_STATUS_PICKED_UP = "已完成取餐";
+    private static final String DELIVERY_STATUS_TIMED_OUT = "等待超时";
+    private static final String DELIVERY_STATUS_CANCELLED = "配送已取消";
+    private static final String NAV_ARRIVE_URL = "http://192.168.112.194:9088/nav_arrive";
+    private static final okhttp3.MediaType JSON_MEDIA_TYPE =
+            okhttp3.MediaType.get("application/json; charset=utf-8");
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
     private static final String WAREHOUSE_TASK_WS = "ws://192.168.112.194:9098";
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
@@ -157,14 +179,20 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private boolean isPermissionRequested;
 
 
-    private Runnable myRunnable;
     private WebSocketService webSocketService;
     private final OkHttpClient warehouseTaskWebSocketClient = new OkHttpClient.Builder().build();
+    private final OkHttpClient arrivalHttpClient = new OkHttpClient.Builder()
+            .readTimeout(6, TimeUnit.MINUTES)
+            .build();
+    private final Object arrivalWaitLock = new Object();
+    private final Map<Integer, Integer> screenRouteBayByPointId = new HashMap<>();
+    private final List<DeliveryProgressItem> deliveryProgressItems = new ArrayList<>();
     Handler handler = new Handler(Looper.getMainLooper());
     private boolean idleLocked = false;
     private boolean unlockDialogShowing = false;
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
+    private volatile boolean activityDestroyed = false;
     private boolean pointUiBound = false;
     private boolean warehouseTaskPending = false;
     private boolean startupGoChargeSent = false;
@@ -175,6 +203,33 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     private long idleUnlockFirstTapTime = 0L;
     private int pointRefreshRetryCount = 0;
     private boolean pointAutoRefreshActive = false;
+    private volatile boolean screenCompartmentRouteActive = false;
+    private boolean arrivalWaitActive = false;
+    private int arrivalWaitGeneration = 0;
+    private int arrivalWaitNavigationTaskGeneration = 0;
+    private int lastHandledScreenArrivalPosition = -1;
+    private volatile int navigationTaskGeneration = 0;
+    private int activeNavigationTaskGeneration = 0;
+    private int activeNavigationSessionGeneration = -1;
+    private boolean navigationTaskActive = false;
+    private boolean navigationLegArmed = false;
+    private int navigationLegPosition = -1;
+    private int navigationRouteOffset = 0;
+    private int arrivalWaitRoutePosition = -1;
+    private Runnable arrivalWaitTimeoutRunnable;
+    private Call pendingArrivalReportCall;
+    private long arrivalWaitDeadlineElapsedRealtime = 0L;
+    private String deliveryProgressSummary = "暂无配送任务";
+    private final Runnable deliveryCountdownRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (activityDestroyed || !isArrivalWaitActive()) {
+                return;
+            }
+            renderDeliveryProgress();
+            handler.postDelayed(this, DELIVERY_COUNTDOWN_UPDATE_INTERVAL_MS);
+        }
+    };
     private final Runnable idleLockRunnable = new Runnable() {
         @Override
         public void run() {
@@ -771,43 +826,96 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         VIDEO
     }
     private WebServer server;
+    private volatile PickupStatusServer pickupStatusServer;
     private List<RouteNode> response=new ArrayList();
 
     private void initWebSocket() {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                if (activityDestroyed) {
+                    return;
+                }
                 server = new WebServer(9095,MainActivity.this);
                 try {
                     server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+                    if (activityDestroyed) {
+                        server.stop();
+                        return;
+                    }
                     server.setWebCallback(new WebServer.WebCallback() {
                         @Override
                         public void onMessage(String text,String url) {
                             Log.d("MyServer","url=="+url+",text=="+text);
                             switch (url){
                                 case "/robot_task/go_to_charge":
-                                    flag="go_to_charge";
                                     ChargeModel chargeModel = new Gson().fromJson(text, new TypeToken<ChargeModel>(){}.getType());
                                     Log.d("Charger===","ChargeModel=="+new Gson().toJson(chargeModel));
-                                    NavManager.getInstance().stop();
-                                    //   NavManager.getInstance().release();
-                                    mPeanutCharger.setPile(Integer.parseInt(chargeModel.getData().get(0).getId()));
-                                    mPeanutCharger.execute();
-                                    mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_AUTO);
+                                    runOnUiThread(() -> {
+                                        if (activityDestroyed) {
+                                            return;
+                                        }
+                                        cancelScreenCompartmentRoute("HTTP 回充任务");
+                                        mBinding.tvNavigate.setEnabled(true);
+                                        flag="go_to_charge";
+                                        NavManager.getInstance().stop();
+                                        //   NavManager.getInstance().release();
+                                        mPeanutCharger.setPile(Integer.parseInt(chargeModel.getData().get(0).getId()));
+                                        mPeanutCharger.execute();
+                                        mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_AUTO);
+                                    });
                                     break;
                                 case "/robot_task/send_point":
-                                    if (mPeanutCharger!=null){
-                                        Log.d("navigatenext","CHARGE_ACTION_STOP");
-                                        mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_STOP);
+                                    List<RouteNode> upstreamRouteNodes;
+                                    try {
+                                        upstreamRouteNodes = new Gson().fromJson(
+                                                text,
+                                                new TypeToken<List<RouteNode>>(){}.getType()
+                                        );
+                                    } catch (RuntimeException exception) {
+                                        Log.w(TAG, "ignore malformed upstream send_point route", exception);
+                                        break;
                                     }
-                                    flag="send_point";
-                                    routeNodes = new Gson().fromJson(text, new TypeToken<List<RouteNode>>(){}.getType());
-                                    Log.d("navigatenext","send_poin=="+new Gson().toJson(routeNodes));
-                                    prepareNav(routeNodes);
+                                    boolean routeContainsNullNode = false;
+                                    if (upstreamRouteNodes != null) {
+                                        for (RouteNode upstreamRouteNode : upstreamRouteNodes) {
+                                            if (upstreamRouteNode == null) {
+                                                routeContainsNullNode = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (upstreamRouteNodes == null
+                                            || upstreamRouteNodes.isEmpty()
+                                            || routeContainsNullNode) {
+                                        Log.w(TAG, "ignore invalid upstream send_point route");
+                                        break;
+                                    }
+                                    runOnUiThread(() -> {
+                                        if (activityDestroyed) {
+                                            return;
+                                        }
+                                        cancelScreenCompartmentRoute("上游 send_point 抢占");
+                                        if (mPeanutCharger!=null){
+                                            Log.d("navigatenext","CHARGE_ACTION_STOP");
+                                            mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_STOP);
+                                        }
+                                        flag="send_point";
+                                        routeNodes = new ArrayList<>(upstreamRouteNodes);
+                                        Log.d("navigatenext","send_poin=="+new Gson().toJson(routeNodes));
+                                        prepareNav(routeNodes);
+                                    });
                                     break;
                                 case "/robot_task/send_stop":
                                     Log.d("MyServer","send_stop==");
-                                    NavManager.getInstance().stop();
+                                    runOnUiThread(() -> {
+                                        if (activityDestroyed) {
+                                            return;
+                                        }
+                                        cancelScreenCompartmentRoute("上游停止任务");
+                                        NavManager.getInstance().stop();
+                                        mBinding.tvNavigate.setEnabled(true);
+                                    });
                                     break;
                                 case "/robot_task/screen_control":
                                     ScreenModel screenModel = new Gson().fromJson(text, new TypeToken<ScreenModel>(){}.getType());
@@ -874,9 +982,31 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
             }
         }).start();
 
-
-
+        startPickupStatusServer();
         bindService(new Intent(this, WebSocketService.class), serviceConnection, BIND_AUTO_CREATE);
+    }
+
+    private void startPickupStatusServer() {
+        PickupStatusServer newPickupStatusServer = new PickupStatusServer(
+                PICKUP_STATUS_SERVER_PORT,
+                this::handlePickupCompleted
+        );
+        pickupStatusServer = newPickupStatusServer;
+        new Thread(() -> {
+            if (activityDestroyed) {
+                return;
+            }
+            try {
+                newPickupStatusServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+                if (activityDestroyed) {
+                    newPickupStatusServer.stop();
+                    return;
+                }
+                Log.i(TAG, "pickup status server started on port " + PICKUP_STATUS_SERVER_PORT);
+            } catch (IOException exception) {
+                Log.e(TAG, "pickup status server failed to start", exception);
+            }
+        }, "pickup-status-server").start();
     }
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -954,6 +1084,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         mBinding.tvCompartment1.setOnClickListener(this);
         mBinding.tvCompartment2.setOnClickListener(this);
         mBinding.tvCompartment3.setOnClickListener(this);
+        mBinding.tvPointSelectionTab.setOnClickListener(this);
+        mBinding.tvDeliveryProgressTab.setOnClickListener(this);
+        showPointSelectionView();
+        renderDeliveryProgress();
 
         PeanutRuntime.getInstance().registerListener(mRuntimeListener);
         mAdapter.setOnClickItemListener(new OnItemClickListener() {
@@ -1082,6 +1216,11 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         if (point == null) {
             return;
         }
+        if (screenCompartmentRouteActive) {
+            tip("配送进行中，点位和仓位仅供查看");
+            refreshPointBindingUi();
+            return;
+        }
         if (findSelectedPointIndex(point.getId()) >= 0) {
             tip("该点位已绑定，请点击对应仓位清空");
             refreshPointBindingUi();
@@ -1103,6 +1242,10 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     private void handleCompartmentClick(int compartmentIndex) {
         if (compartmentIndex < 0 || compartmentIndex >= compartmentPoints.length) {
+            return;
+        }
+        if (screenCompartmentRouteActive) {
+            tip("配送进行中，点位和仓位仅供查看");
             return;
         }
 
@@ -1200,6 +1343,190 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         return -1;
     }
 
+    private boolean activateScreenCompartmentRoute() {
+        Map<Integer, Integer> routeBaySnapshot = new HashMap<>();
+        for (DestModel.DataBean selectedPoint : selectedPointList) {
+            int compartmentIndex = findCompartmentIndexByPointId(selectedPoint.getId());
+            if (compartmentIndex < 0) {
+                tip("点位未绑定有效仓位，请重新选择");
+                return false;
+            }
+            if (routeBaySnapshot.containsKey(selectedPoint.getId())) {
+                tip("同一点位不能绑定多个仓位");
+                return false;
+            }
+            routeBaySnapshot.put(selectedPoint.getId(), compartmentIndex + 1);
+        }
+
+        cancelScreenCompartmentRoute("开始新的屏幕仓位任务");
+        synchronized (arrivalWaitLock) {
+            screenRouteBayByPointId.clear();
+            screenRouteBayByPointId.putAll(routeBaySnapshot);
+            lastHandledScreenArrivalPosition = -1;
+            screenCompartmentRouteActive = true;
+        }
+        createDeliveryProgressSnapshot(routeBaySnapshot);
+        showDeliveryProgressView();
+        refreshPointBindingUi();
+        return true;
+    }
+
+    private void createDeliveryProgressSnapshot(Map<Integer, Integer> routeBaySnapshot) {
+        deliveryProgressItems.clear();
+        for (DestModel.DataBean selectedPoint : selectedPointList) {
+            Integer bay = routeBaySnapshot.get(selectedPoint.getId());
+            if (bay != null) {
+                deliveryProgressItems.add(new DeliveryProgressItem(
+                        getPointDisplayName(selectedPoint),
+                        bay,
+                        DELIVERY_STATUS_QUEUED
+                ));
+            }
+        }
+        if (!deliveryProgressItems.isEmpty()) {
+            deliveryProgressItems.get(0).status = DELIVERY_STATUS_TRAVELING;
+            deliveryProgressSummary = "配送中 · 前往第 1/" + deliveryProgressItems.size() + " 个点位";
+        } else {
+            deliveryProgressSummary = "暂无配送任务";
+        }
+        renderDeliveryProgress();
+    }
+
+    private void showPointSelectionView() {
+        if (mBinding == null) {
+            return;
+        }
+        mBinding.llPointSelectionContent.setVisibility(View.VISIBLE);
+        mBinding.svDeliveryProgress.setVisibility(View.GONE);
+        updateDeliveryTabStyles(false);
+    }
+
+    private void showDeliveryProgressView() {
+        if (mBinding == null) {
+            return;
+        }
+        mBinding.llPointSelectionContent.setVisibility(View.GONE);
+        mBinding.svDeliveryProgress.setVisibility(View.VISIBLE);
+        updateDeliveryTabStyles(true);
+        renderDeliveryProgress();
+    }
+
+    private void updateDeliveryTabStyles(boolean deliveryProgressSelected) {
+        int selectedBackgroundColor = Color.WHITE;
+        int unselectedBackgroundColor = getResources().getColor(R.color.grey_300);
+        int selectedTextColor = getResources().getColor(R.color.blue);
+        int unselectedTextColor = getResources().getColor(R.color.grey_700);
+        mBinding.tvPointSelectionTab.setBackgroundColor(deliveryProgressSelected
+                ? unselectedBackgroundColor
+                : selectedBackgroundColor);
+        mBinding.tvDeliveryProgressTab.setBackgroundColor(deliveryProgressSelected
+                ? selectedBackgroundColor
+                : unselectedBackgroundColor);
+        mBinding.tvPointSelectionTab.setTextColor(deliveryProgressSelected
+                ? unselectedTextColor
+                : selectedTextColor);
+        mBinding.tvDeliveryProgressTab.setTextColor(deliveryProgressSelected
+                ? selectedTextColor
+                : unselectedTextColor);
+    }
+
+    private void updateDeliveryProgressStatus(int routePosition, String status) {
+        if (routePosition < 0 || routePosition >= deliveryProgressItems.size()) {
+            return;
+        }
+        deliveryProgressItems.get(routePosition).status = status;
+        if (DELIVERY_STATUS_TRAVELING.equals(status)) {
+            deliveryProgressSummary = "配送中 · 前往第 " + (routePosition + 1)
+                    + "/" + deliveryProgressItems.size() + " 个点位";
+        } else if (DELIVERY_STATUS_WAITING.equals(status)) {
+            deliveryProgressSummary = "配送中 · 第 " + (routePosition + 1)
+                    + "/" + deliveryProgressItems.size() + " 个点位等待取餐";
+        }
+        renderDeliveryProgress();
+    }
+
+    private void renderDeliveryProgress() {
+        if (mBinding == null || activityDestroyed) {
+            return;
+        }
+        mBinding.tvDeliveryProgressSummary.setText(deliveryProgressSummary);
+        mBinding.llDeliveryProgressItems.removeAllViews();
+        for (int routePosition = 0; routePosition < deliveryProgressItems.size(); routePosition++) {
+            DeliveryProgressItem progressItem = deliveryProgressItems.get(routePosition);
+            TextView progressCard = new TextView(this);
+            LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            layoutParams.setMargins(0, 0, 0, dp(6));
+            progressCard.setLayoutParams(layoutParams);
+            progressCard.setPadding(dp(8), dp(8), dp(8), dp(8));
+            progressCard.setTextColor(getResources().getColor(R.color.grey_900));
+            progressCard.setTextSize(13);
+            progressCard.setGravity(Gravity.CENTER_VERTICAL);
+            progressCard.setBackgroundColor(getDeliveryProgressColor(progressItem.status));
+
+            StringBuilder cardText = new StringBuilder()
+                    .append(routePosition + 1)
+                    .append(". ")
+                    .append(progressItem.pointName)
+                    .append("\n仓位 ")
+                    .append(progressItem.bay)
+                    .append(" · ")
+                    .append(progressItem.status);
+            if (DELIVERY_STATUS_WAITING.equals(progressItem.status)) {
+                cardText.append(" · ").append(formatArrivalWaitCountdown());
+            }
+            progressCard.setText(cardText.toString());
+            mBinding.llDeliveryProgressItems.addView(progressCard);
+        }
+    }
+
+    private int getDeliveryProgressColor(String status) {
+        if (DELIVERY_STATUS_TRAVELING.equals(status)) {
+            return Color.parseColor("#BBDEFB");
+        }
+        if (DELIVERY_STATUS_WAITING.equals(status)) {
+            return Color.parseColor("#FFF9C4");
+        }
+        if (DELIVERY_STATUS_PICKED_UP.equals(status)) {
+            return Color.parseColor("#C8E6C9");
+        }
+        if (DELIVERY_STATUS_TIMED_OUT.equals(status)
+                || DELIVERY_STATUS_CANCELLED.equals(status)) {
+            return Color.parseColor("#FFCDD2");
+        }
+        return getResources().getColor(R.color.grey_200);
+    }
+
+    private String formatArrivalWaitCountdown() {
+        long remainingMilliseconds = Math.max(
+                0L,
+                arrivalWaitDeadlineElapsedRealtime - SystemClock.elapsedRealtime()
+        );
+        long remainingSeconds = (remainingMilliseconds + 999L) / 1000L;
+        long remainingMinutes = remainingSeconds / 60L;
+        long secondsWithinMinute = remainingSeconds % 60L;
+        return String.format(
+                Locale.getDefault(),
+                "%02d:%02d",
+                remainingMinutes,
+                secondsWithinMinute
+        );
+    }
+
+    private static final class DeliveryProgressItem {
+        private final String pointName;
+        private final int bay;
+        private String status;
+
+        private DeliveryProgressItem(String pointName, int bay, String status) {
+            this.pointName = pointName;
+            this.bay = bay;
+            this.status = status;
+        }
+    }
+
     private List<DestModel.DataBean> getHighlightedPoints() {
         List<DestModel.DataBean> highlightedPoints = new ArrayList<>(selectedPointList);
         if (pendingPoint != null) {
@@ -1219,7 +1546,14 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         if (mBinding == null) {
             return;
         }
-        if (pendingPoint == null) {
+        boolean deliveryRouteIsReadOnly = screenCompartmentRouteActive;
+        mBinding.rvPoint.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
+        mBinding.tvCompartment1.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
+        mBinding.tvCompartment2.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
+        mBinding.tvCompartment3.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
+        if (deliveryRouteIsReadOnly) {
+            mBinding.tvPendingPoint.setText("配送进行中 · 点位和仓位仅供查看");
+        } else if (pendingPoint == null) {
             mBinding.tvPendingPoint.setText("待绑定：请先点击上方点位");
         } else {
             mBinding.tvPendingPoint.setText("待绑定：" + getPointDisplayName(pendingPoint)
@@ -1314,10 +1648,24 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     }
     @Override
     protected void onDestroy() {
+        activityDestroyed = true;
+        cancelScreenCompartmentRoute("Activity 销毁");
         handler.removeCallbacks(idleLockRunnable);
         handler.removeCallbacks(pointRefreshRetryRunnable);
         handler.removeCallbacks(startupGoChargeRunnable);
         handler.removeCallbacks(warehouseTaskStatusClearRunnable);
+        handler.removeCallbacks(warehouseTaskLoadingRunnable);
+        handler.removeCallbacks(warehouseTaskTimeoutRunnable);
+        if (server != null) {
+            server.stop();
+        }
+        PickupStatusServer pickupServerToStop = pickupStatusServer;
+        pickupStatusServer = null;
+        if (pickupServerToStop != null) {
+            pickupServerToStop.stop();
+        }
+        arrivalHttpClient.dispatcher().executorService().shutdown();
+        arrivalHttpClient.connectionPool().evictAll();
         PeanutSDK.getInstance().release();
         NavManager.getInstance().stop();
         NavManager.getInstance().release();
@@ -1398,7 +1746,11 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
     public void onClick(View v) {
         int id = v.getId();
 
-        if (id == mBinding.tvCompartment1.getId()) {
+        if (id == mBinding.tvPointSelectionTab.getId()) {
+            showPointSelectionView();
+        } else if (id == mBinding.tvDeliveryProgressTab.getId()) {
+            showDeliveryProgressView();
+        } else if (id == mBinding.tvCompartment1.getId()) {
             handleCompartmentClick(0);
         } else if (id == mBinding.tvCompartment2.getId()) {
             handleCompartmentClick(1);
@@ -1413,8 +1765,6 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 tip("请先将待绑定点位放入仓位，或取消选择");
                 return;
             }
-            flag="";
-            mBinding.tvNavigate.setEnabled(false);
             routeNodes = new ArrayList<>();
 
             for (DestModel.DataBean dataBean : selectedPointList) {
@@ -1423,6 +1773,11 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
                 routeNode.setName(dataBean.getName());
                 routeNodes.add(routeNode);
             }
+            if (!activateScreenCompartmentRoute()) {
+                return;
+            }
+            flag="";
+            mBinding.tvNavigate.setEnabled(false);
             Log.d("navigatenext","routeNodes===="+new Gson().toJson(routeNodes)+",size="+routeNodes.size());
 //            RouteNode node = new RouteNode();
 //            node.setId(Integer.parseInt(editText.getText().toString()));
@@ -1433,12 +1788,22 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         }else if (id==mBinding.tvSecondaryScreenDisplay.getId()){
             //   startHardwareTests(null);
         }else if (id==mBinding.tvRefreshPoints.getId()){
+            if (screenCompartmentRouteActive) {
+                tip("配送进行中，暂不支持刷新点位");
+                return;
+            }
             refreshPointData(true);
         }else if (id==mBinding.tvGoCharge.getId()){
+            cancelScreenCompartmentRoute("手动回充");
+            mBinding.tvNavigate.setEnabled(true);
             sendGoChargeTask();
         }else if (id==mBinding.tvPatrolWarehouse.getId()){
+            cancelScreenCompartmentRoute("手动巡仓");
+            mBinding.tvNavigate.setEnabled(true);
             sendPatrolWarehouseTask();
         }else if (id==mBinding.tvRecall.getId()){
+            cancelScreenCompartmentRoute("手动召回");
+            mBinding.tvNavigate.setEnabled(true);
             sendRecallTask();
         }
     }
@@ -1703,17 +2068,75 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
      * 准备导航
      * @param routeNodes
      */
-    private void prepareNav(List<RouteNode> routeNodes) {
+    private void prepareNav(List<RouteNode> newRouteNodes) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            List<RouteNode> routeSnapshot = newRouteNodes == null
+                    ? null
+                    : new ArrayList<>(newRouteNodes);
+            handler.post(() -> prepareNav(routeSnapshot));
+            return;
+        }
+        if (activityDestroyed || newRouteNodes == null || newRouteNodes.isEmpty()) {
+            Log.w(TAG, "ignore invalid navigation route");
+            return;
+        }
+
+        invalidateNavigationTask("prepare replacement");
         NavManager.getInstance().stop();
 //        NavManager.getInstance().release();
-        peanutNavigation = NavManager.getInstance().getmPeanutNavigation();
-        peanutNavigation.setTargets(routeNodes);
+        routeNodes = new ArrayList<>(newRouteNodes);
+        navigationRouteOffset = 0;
 
- //       NavManager.getInstance().setSpeed(100);
-        NavManager.getInstance().setSpeed(routeNodes.size()==1
+        navigationTaskGeneration++;
+        activeNavigationTaskGeneration = navigationTaskGeneration;
+        navigationTaskActive = true;
+        navigationLegArmed = false;
+        navigationLegPosition = -1;
+
+        startNavigationSession(screenCompartmentRouteActive);
+    }
+
+    private void startNavigationSession(boolean singleScreenLeg) {
+        NavManager navManager = NavManager.getInstance();
+        activeNavigationSessionGeneration = navManager.recreateNavigationSession(
+                singleScreenLeg ? 1 : navManager.getRepeatCount()
+        );
+        peanutNavigation = navManager.getmPeanutNavigation();
+        List<RouteNode> sdkRouteNodes = singleScreenLeg
+                ? new ArrayList<>(routeNodes.subList(
+                        navigationRouteOffset,
+                        navigationRouteOffset + 1
+                ))
+                : routeNodes;
+        peanutNavigation.setTargets(sdkRouteNodes);
+
+        navManager.setSpeed(routeNodes.size()==1
                 ? MmkvUtils.decodeInt("single_point_speed", DEFAULT_NAVIGATION_SPEED)
                 : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED));
-        NavManager.getInstance().prepare();
+        navManager.prepare();
+    }
+
+    private int getCurrentRoutePosition() {
+        if (peanutNavigation == null) {
+            return -1;
+        }
+        int sdkPosition = peanutNavigation.getCurrentPosition();
+        if (sdkPosition < 0) {
+            return -1;
+        }
+        return navigationRouteOffset + sdkPosition;
+    }
+
+    private void startNextScreenNavigationLeg(int taskGeneration, int nextPosition) {
+        if (!isCurrentNavigationTask(taskGeneration) || !isValidRoutePosition(nextPosition)) {
+            Log.w(TAG, "ignore invalid next screen leg: generation=" + taskGeneration
+                    + ", position=" + nextPosition);
+            return;
+        }
+        navigationLegArmed = false;
+        navigationLegPosition = -1;
+        navigationRouteOffset = nextPosition;
+        startNavigationSession(true);
     }
 
     public  List<DestModel.DataBean> getRouteNodesList(){
@@ -1723,23 +2146,119 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
         @Override
     public void onStateChanged(int state, int schedule) {
-        Log.d("navigatenext","state="+state);
-        switch (state) {
-            case Navigation.STATE_DESTINATION:
-                arrived();
-                break;
+        Log.w(TAG, "ignore navigation state without session token: state=" + state);
+    }
+
+    @Override
+    public void onSessionStateChanged(int sessionGeneration, int state, int schedule) {
+        int observedTaskGeneration = navigationTaskGeneration;
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            handleNavigationStateChanged(state, observedTaskGeneration, sessionGeneration);
+        } else {
+            handler.post(() -> handleNavigationStateChanged(
+                    state,
+                    observedTaskGeneration,
+                    sessionGeneration
+            ));
         }
     }
-    private void arrived() {
+
+    private void handleNavigationStateChanged(
+            int state,
+            int observedTaskGeneration,
+            int observedSessionGeneration
+    ) {
+        Log.d("navigatenext", "state=" + state + ", generation=" + observedTaskGeneration);
+        if (!isCurrentNavigationTask(observedTaskGeneration)
+                || observedSessionGeneration != activeNavigationSessionGeneration
+                || peanutNavigation == null) {
+            Log.d(TAG, "ignore stale navigation state: state=" + state
+                    + ", generation=" + observedTaskGeneration
+                    + ", session=" + observedSessionGeneration);
+            return;
+        }
+
+        if (state == Navigation.STATE_RUNNING) {
+            int currentPosition = getCurrentRoutePosition();
+            if (!isValidRoutePosition(currentPosition) || isArrivalWaitActive()) {
+                return;
+            }
+            navigationLegPosition = currentPosition;
+            navigationLegArmed = true;
+            Log.d(TAG, "navigation leg armed: generation=" + observedTaskGeneration
+                    + ", position=" + currentPosition);
+            return;
+        }
+
+        if (state != Navigation.STATE_DESTINATION) {
+            return;
+        }
+
+        int currentPosition = getCurrentRoutePosition();
+        if (!navigationLegArmed
+                || currentPosition != navigationLegPosition
+                || !isValidRoutePosition(currentPosition)) {
+            Log.d(TAG, "ignore unarmed destination: generation=" + observedTaskGeneration
+                    + ", position=" + currentPosition
+                    + ", armedPosition=" + navigationLegPosition);
+            return;
+        }
+
+        navigationLegArmed = false;
+        arrived(observedTaskGeneration, currentPosition);
+    }
+
+    private void arrived(int taskGeneration, int currentPosition) {
+        if (!isCurrentNavigationTask(taskGeneration)
+                || peanutNavigation == null
+                || !isValidRoutePosition(currentPosition)) {
+            Log.w(TAG, "ignore invalid arrival: generation=" + taskGeneration
+                    + ", position=" + currentPosition);
+            return;
+        }
         NavManager.getInstance().readyGo(false);
 //        Log.d("navigatenext","getQueueName="+(response.get(0).getQueueName()));
-        Log.d("navigatenext","getCurrentPosition="+peanutNavigation.getCurrentPosition()+",size=="+routeNodes.size());
-        if (routeNodes!=null&&flag.equals("send_point")&&!TextUtils.isEmpty(routeNodes.get(peanutNavigation.getCurrentPosition()).getQueueName())){
-            mediaPlayerShow(routeNodes.get(peanutNavigation.getCurrentPosition()).getQueueName());
+        Log.d("navigatenext","getCurrentPosition="+currentPosition+",size=="+routeNodes.size());
+        if (screenCompartmentRouteActive) {
+            handleScreenCompartmentArrival(taskGeneration, currentPosition);
+            return;
+        }
+        if ("send_point".equals(flag)
+                && !TextUtils.isEmpty(routeNodes.get(currentPosition).getQueueName())){
+            mediaPlayerShow(routeNodes.get(currentPosition).getQueueName());
         }
         //   ttsUntil.speech(peanutNavigation.getCurrentNode().getQueueName(),false);
         navigatenext();
         //  Toast.makeText(this,"已经到达目的地", Toast.LENGTH_SHORT).show();
+    }
+
+    private boolean isCurrentNavigationTask(int taskGeneration) {
+        return !activityDestroyed
+                && navigationTaskActive
+                && taskGeneration == navigationTaskGeneration
+                && taskGeneration == activeNavigationTaskGeneration;
+    }
+
+    private boolean isValidRoutePosition(int position) {
+        return routeNodes != null && position >= 0 && position < routeNodes.size();
+    }
+
+    private boolean isArrivalWaitActive() {
+        synchronized (arrivalWaitLock) {
+            return arrivalWaitActive;
+        }
+    }
+
+    private void invalidateNavigationTask(String reason) {
+        navigationTaskGeneration++;
+        activeNavigationTaskGeneration = navigationTaskGeneration;
+        navigationTaskActive = false;
+        activeNavigationSessionGeneration = -1;
+        navigationLegArmed = false;
+        navigationLegPosition = -1;
+        navigationRouteOffset = 0;
+        Log.d(TAG, "navigation task invalidated: " + reason
+                + ", generation=" + navigationTaskGeneration);
     }
 
     private void mediaPlayerShow(String dataSource) {
@@ -1767,25 +2286,252 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
         }
     }
 
+    private void handleScreenCompartmentArrival(int taskGeneration, int currentPosition) {
+        if (!isCurrentNavigationTask(taskGeneration) || !isValidRoutePosition(currentPosition)) {
+            Log.e(TAG, "screen arrival position is invalid: " + currentPosition);
+            return;
+        }
+
+        RouteNode currentNode = routeNodes.get(currentPosition);
+        Integer bay;
+        int waitGeneration;
+        synchronized (arrivalWaitLock) {
+            if (!screenCompartmentRouteActive
+                    || arrivalWaitActive
+                    || lastHandledScreenArrivalPosition == currentPosition) {
+                Log.d(TAG, "ignore duplicate screen arrival at position " + currentPosition);
+                return;
+            }
+            bay = screenRouteBayByPointId.get(currentNode.getId());
+            if (bay == null) {
+                Log.e(TAG, "no compartment mapping for point " + currentNode.getId());
+                return;
+            }
+            arrivalWaitGeneration++;
+            waitGeneration = arrivalWaitGeneration;
+            arrivalWaitActive = true;
+            arrivalWaitNavigationTaskGeneration = taskGeneration;
+            arrivalWaitRoutePosition = currentPosition;
+            lastHandledScreenArrivalPosition = currentPosition;
+        }
+        arrivalWaitDeadlineElapsedRealtime = SystemClock.elapsedRealtime() + ARRIVAL_WAIT_TIMEOUT_MS;
+        updateDeliveryProgressStatus(currentPosition, DELIVERY_STATUS_WAITING);
+        handler.removeCallbacks(deliveryCountdownRunnable);
+        handler.post(deliveryCountdownRunnable);
+
+        if (routeNodes.size() == 1) {
+            Log.d("navigatenext","delivery_voice_address="+DEFAULT_DELIVERY_VOICE_URL);
+            mediaPlayerShow(DEFAULT_DELIVERY_VOICE_URL);
+        }
+
+        sendArrivalReport(currentNode, bay, waitGeneration);
+        Runnable timeoutRunnable = () -> {
+            if (!claimArrivalWait(waitGeneration)) {
+                return;
+            }
+            completeArrivalWait(waitGeneration, "等待五分钟超时");
+        };
+        synchronized (arrivalWaitLock) {
+            if (waitGeneration != arrivalWaitGeneration || !arrivalWaitActive) {
+                return;
+            }
+            arrivalWaitTimeoutRunnable = timeoutRunnable;
+        }
+        handler.postDelayed(timeoutRunnable, ARRIVAL_WAIT_TIMEOUT_MS);
+        Log.i(TAG, "arrival wait started: point=" + currentNode.getName()
+                + ", bay=" + bay + ", generation=" + waitGeneration);
+    }
+
+    private boolean handlePickupCompleted() {
+        int waitGeneration;
+        synchronized (arrivalWaitLock) {
+            waitGeneration = arrivalWaitGeneration;
+        }
+        if (!claimArrivalWait(waitGeneration)) {
+            return false;
+        }
+        handler.post(() -> completeArrivalWait(waitGeneration, "收到取餐完成通知"));
+        return true;
+    }
+
+    private boolean claimArrivalWait(int waitGeneration) {
+        synchronized (arrivalWaitLock) {
+            if (!screenCompartmentRouteActive
+                    || !arrivalWaitActive
+                    || waitGeneration != arrivalWaitGeneration) {
+                return false;
+            }
+            arrivalWaitActive = false;
+            return true;
+        }
+    }
+
+    private void completeArrivalWait(int waitGeneration, String reason) {
+        Runnable timeoutRunnable;
+        int taskGeneration;
+        int routePosition;
+        synchronized (arrivalWaitLock) {
+            if (!screenCompartmentRouteActive || waitGeneration != arrivalWaitGeneration) {
+                return;
+            }
+            timeoutRunnable = arrivalWaitTimeoutRunnable;
+            arrivalWaitTimeoutRunnable = null;
+            taskGeneration = arrivalWaitNavigationTaskGeneration;
+            routePosition = arrivalWaitRoutePosition;
+        }
+        if (timeoutRunnable != null) {
+            handler.removeCallbacks(timeoutRunnable);
+        }
+        handler.removeCallbacks(deliveryCountdownRunnable);
+        arrivalWaitDeadlineElapsedRealtime = 0L;
+        cancelPendingArrivalReport();
+        if (!isCurrentNavigationTask(taskGeneration)) {
+            Log.d(TAG, "ignore stale arrival wait completion: waitGeneration=" + waitGeneration
+                    + ", taskGeneration=" + taskGeneration);
+            return;
+        }
+        Log.i(TAG, reason + ", generation=" + waitGeneration);
+        String completedStatus = reason.contains("超时")
+                ? DELIVERY_STATUS_TIMED_OUT
+                : DELIVERY_STATUS_PICKED_UP;
+        updateDeliveryProgressStatus(routePosition, completedStatus);
+
+        if (routePosition == routeNodes.size() - 1) {
+            synchronized (arrivalWaitLock) {
+                screenCompartmentRouteActive = false;
+                screenRouteBayByPointId.clear();
+                lastHandledScreenArrivalPosition = -1;
+            }
+            invalidateNavigationTask("screen route completed");
+            deliveryProgressSummary = "配送完成 · 已开始召回";
+            renderDeliveryProgress();
+            refreshPointBindingUi();
+            mBinding.tvNavigate.setEnabled(true);
+            sendRecallTask();
+        } else {
+            updateDeliveryProgressStatus(routePosition + 1, DELIVERY_STATUS_TRAVELING);
+            startNextScreenNavigationLeg(taskGeneration, routePosition + 1);
+        }
+    }
+
+    private void sendArrivalReport(RouteNode currentNode, int bay, int waitGeneration) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("point_name", currentNode.getName());
+            payload.put("bay", bay);
+            RequestBody requestBody = RequestBody.create(payload.toString(), JSON_MEDIA_TYPE);
+            Request request = new Request.Builder()
+                    .url(NAV_ARRIVE_URL)
+                    .post(requestBody)
+                    .build();
+
+            Call arrivalReportCall = arrivalHttpClient.newCall(request);
+            Call previousArrivalReportCall;
+            synchronized (arrivalWaitLock) {
+                if (!screenCompartmentRouteActive
+                        || !arrivalWaitActive
+                        || waitGeneration != arrivalWaitGeneration) {
+                    Log.d(TAG, "skip stale nav_arrive request: generation=" + waitGeneration);
+                    return;
+                }
+                previousArrivalReportCall = pendingArrivalReportCall;
+                pendingArrivalReportCall = arrivalReportCall;
+            }
+            if (previousArrivalReportCall != null) {
+                previousArrivalReportCall.cancel();
+            }
+            Log.i(TAG, "send nav_arrive: " + payload);
+            arrivalReportCall.enqueue(new Callback() {
+                @Override
+                public void onFailure(@NonNull Call call, @NonNull IOException exception) {
+                    clearPendingArrivalReport(call);
+                    if (!call.isCanceled()) {
+                        Log.e(TAG, "nav_arrive request failed", exception);
+                    }
+                }
+
+                @Override
+                public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                    try (Response arrivalResponse = response) {
+                        String responseBody = arrivalResponse.body() == null
+                                ? ""
+                                : arrivalResponse.body().string();
+                        Log.i(TAG, "nav_arrive response: status=" + arrivalResponse.code()
+                                + ", body=" + responseBody);
+                    } finally {
+                        clearPendingArrivalReport(call);
+                    }
+                }
+            });
+        } catch (JSONException exception) {
+            Log.e(TAG, "failed to create nav_arrive payload", exception);
+        }
+    }
+
+    private void cancelPendingArrivalReport() {
+        Call arrivalReportCall;
+        synchronized (arrivalWaitLock) {
+            arrivalReportCall = pendingArrivalReportCall;
+            pendingArrivalReportCall = null;
+        }
+        if (arrivalReportCall != null) {
+            arrivalReportCall.cancel();
+        }
+    }
+
+    private void clearPendingArrivalReport(Call arrivalReportCall) {
+        synchronized (arrivalWaitLock) {
+            if (pendingArrivalReportCall == arrivalReportCall) {
+                pendingArrivalReportCall = null;
+            }
+        }
+    }
+
+    private void cancelScreenCompartmentRoute(String reason) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> cancelScreenCompartmentRoute(reason));
+            return;
+        }
+        boolean deliveryRouteWasActive = screenCompartmentRouteActive;
+        Runnable timeoutRunnable;
+        synchronized (arrivalWaitLock) {
+            arrivalWaitGeneration++;
+            arrivalWaitActive = false;
+            arrivalWaitNavigationTaskGeneration = 0;
+            arrivalWaitRoutePosition = -1;
+            screenCompartmentRouteActive = false;
+            lastHandledScreenArrivalPosition = -1;
+            screenRouteBayByPointId.clear();
+            timeoutRunnable = arrivalWaitTimeoutRunnable;
+            arrivalWaitTimeoutRunnable = null;
+        }
+        if (timeoutRunnable != null) {
+            handler.removeCallbacks(timeoutRunnable);
+        }
+        handler.removeCallbacks(deliveryCountdownRunnable);
+        arrivalWaitDeadlineElapsedRealtime = 0L;
+        cancelPendingArrivalReport();
+        invalidateNavigationTask(reason);
+        if (deliveryRouteWasActive) {
+            for (DeliveryProgressItem progressItem : deliveryProgressItems) {
+                if (DELIVERY_STATUS_QUEUED.equals(progressItem.status)
+                        || DELIVERY_STATUS_TRAVELING.equals(progressItem.status)
+                        || DELIVERY_STATUS_WAITING.equals(progressItem.status)) {
+                    progressItem.status = DELIVERY_STATUS_CANCELLED;
+                }
+            }
+            deliveryProgressSummary = "配送结束 · " + reason;
+            renderDeliveryProgress();
+            refreshPointBindingUi();
+        }
+        Log.d(TAG, "screen compartment route cancelled: " + reason);
+    }
+
     private void navigatenext() {
         Log.d("navigatenext","lastNode="+NavManager.getInstance().isLastNode());
         Log.d("navigatenext","NextNode="+new Gson().toJson(NavManager.getInstance().getNextNode()));
         Log.d("navigatenext","Targets="+new Gson().toJson(NavManager.getInstance().getTargets()));
         if ( NavManager.getInstance().isLastNode()) {
-            if (peanutNavigation.getRouteNodes().length==1&&TextUtils.isEmpty(flag)){
-                myRunnable = () -> {
-                    RouteNode routeNode = new RouteNode();
-                    routeNode.setId(2);
-                    routeNode.setName("出餐口");
-                    routeNodes.add(routeNode);
-                    prepareNav(routeNodes);
-
-                };
-                handler.postDelayed(myRunnable, 20000);
-                Log.d("navigatenext","delivery_voice_address="+DEFAULT_DELIVERY_VOICE_URL);
-                mediaPlayerShow(DEFAULT_DELIVERY_VOICE_URL);
-            }
-
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -1943,6 +2689,20 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     @Override
     public void onRoutePrepared(RouteNode... routeNodes) {
+        Log.w(TAG, "ignore route prepared without session token");
+    }
+
+    @Override
+    public void onSessionRoutePrepared(int sessionGeneration, RouteNode... routeNodes) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> onSessionRoutePrepared(sessionGeneration, routeNodes));
+            return;
+        }
+        if (!navigationTaskActive
+                || sessionGeneration != activeNavigationSessionGeneration) {
+            Log.d(TAG, "ignore stale route prepared: session=" + sessionGeneration);
+            return;
+        }
         Log.d("navigatenext","readyGo=====");
         NavManager.getInstance().readyGo(true);
     }
@@ -1954,8 +2714,21 @@ public class MainActivity extends AppCompatActivity implements  View.OnClickList
 
     @Override
     public void onError(int i) {
+        Log.w(TAG, "ignore navigation error without session token: code=" + i);
+    }
+
+    @Override
+    public void onSessionError(int sessionGeneration, int code) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> onSessionError(sessionGeneration, code));
+            return;
+        }
+        if (sessionGeneration != activeNavigationSessionGeneration) {
+            Log.d(TAG, "ignore stale navigation error: session=" + sessionGeneration);
+            return;
+        }
         mBinding.tvNavigate.setEnabled(true);
-        Log.d("navigatenext","onerror="+i);
+        Log.d("navigatenext","onerror="+code);
         flag="";
     }
 

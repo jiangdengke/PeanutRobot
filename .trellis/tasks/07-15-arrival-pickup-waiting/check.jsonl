@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"确认实现复用现有下一点、召回和 HTTP 组件，没有并行的路线状态源。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"验证到位、上报、pickup、超时、新任务抢占和生命周期取消的跨层一致性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查导航和网络改动的可读性、边界与验证证据。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查无效请求、网络失败和服务启动失败不会错误推进导航。"}
+{"file": ".trellis/spec/backend/navigation-arrival-contract.md", "reason": "Verify HTTP validation, one-shot waiting, preemption, and stale callback rejection."}

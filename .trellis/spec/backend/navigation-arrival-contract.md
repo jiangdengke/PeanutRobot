@@ -1,0 +1,178 @@
+# Navigation Arrival and Pickup Contract
+
+## Scenario: Screen Compartment Delivery Arrival
+
+### 1. Scope / Trigger
+
+Use this contract when changing any of the following:
+
+- Screen-selected compartment delivery navigation.
+- Arrival reporting to the upstream system.
+- The local pickup-completion HTTP endpoint.
+- Navigation callback forwarding or stale-event protection.
+- Task preemption, timeout handling, or Activity teardown during delivery.
+
+This workflow applies only to screen compartment routes. Routes received through
+`/robot_task/send_point` keep their existing full-route navigation behavior.
+
+### 2. Signatures
+
+Arrival report sent by the robot App:
+
+```http
+POST http://192.168.112.194:9088/nav_arrive
+Content-Type: application/json
+```
+
+Pickup completion received by the robot App at `192.168.112.89`:
+
+```http
+POST /pickup_status HTTP/1.1
+Host: 192.168.112.89:9088
+Content-Type: application/json
+```
+
+Navigation callbacks that can affect route progression must carry their SDK
+session generation:
+
+```java
+void onSessionStateChanged(int sessionGeneration, int state, int schedule);
+void onSessionRoutePrepared(int sessionGeneration, RouteNode... routeNodes);
+void onSessionError(int sessionGeneration, int code);
+```
+
+### 3. Contracts
+
+`/nav_arrive` request body:
+
+```json
+{
+  "point_name": "Restaurant Left Bottom",
+  "bay": 1
+}
+```
+
+- `point_name`: required string from the current route node.
+- `bay`: required integer in the inclusive range `1..3`, read from the immutable
+  point-to-compartment snapshot created at departure.
+- The response body and status are diagnostic only. They must not advance or
+  cancel navigation.
+
+`/pickup_status` request body:
+
+```json
+{
+  "pickup_status": true
+}
+```
+
+- `pickup_status` is required and must be the JSON boolean `true`.
+- Do not add point, bay, task, or generation fields unless the upstream contract
+  is explicitly revised.
+- A valid pickup can consume only the currently active wait generation once.
+- Pickup and the local five-minute timeout converge on the same completion path.
+- Completion advances an intermediate point and recalls after the final point.
+
+Screen route navigation contract:
+
+- Create a new SDK navigation session for every screen route leg.
+- Preserve the global route position separately from the one-node SDK route.
+- Accept `STATE_DESTINATION` only after the same current SDK session has emitted
+  `STATE_RUNNING` for the expected global route position.
+- Reject callbacks whose session generation or task generation is no longer
+  active.
+
+Upstream route preemption contract:
+
+- Parse and validate the complete `/robot_task/send_point` route before
+  cancelling a screen wait.
+- Reject malformed JSON, null or empty lists, and lists containing null nodes.
+- Submit a valid upstream route to one SDK session as the complete route; do not
+  split it into screen-style single-node legs.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Path is not `/pickup_status` | `404` JSON response; do not invoke callback |
+| Method is not `POST` | `405` JSON response with `Allow: POST` |
+| Content-Type is missing or not `application/json` | `415` JSON response |
+| Body is unreadable, empty, or malformed JSON | `400` JSON response |
+| `pickup_status` is missing or is not a JSON boolean | `400` JSON response |
+| `pickup_status` is `false` | `400` JSON response |
+| No active arrival wait exists | `409` JSON response |
+| Valid `pickup_status: true` claims the active wait | `200` JSON response and exactly one completion |
+| Duplicate pickup or timeout loses the claim race | No route progression |
+| Arrival HTTP call belongs to a cancelled wait generation | Cancel or skip the call |
+| Navigation callback carries a stale session generation | Ignore before reading or advancing route state |
+| Activity is destroyed before queued endpoint work runs | Return without touching UI or SDK objects |
+| Incoming upstream route is invalid | Keep the current screen route and wait unchanged |
+
+### 5. Good / Base / Bad Cases
+
+- Good: Point A arrives in bay 2, `/nav_arrive` reports `bay: 2`, pickup is
+  accepted once, and a new SDK session starts point B.
+- Base: No pickup arrives. The five-minute timeout claims the wait and performs
+  the same next-point or final-recall decision.
+- Bad: A stale `STATE_DESTINATION` from point A arrives after point B's SDK
+  session starts. Its session generation does not match and it is ignored.
+- Bad: `/robot_task/send_point` contains `[null]`. Validation rejects it before
+  cancelling the active screen wait.
+- Protocol limitation: A delayed boolean-only pickup from point A that arrives
+  while point B is already waiting cannot be distinguished locally from a valid
+  pickup for point B.
+
+### 6. Tests Required
+
+Static and build checks:
+
+- Assert the arrival URL, POST method, JSON media type, `point_name`, and `bay`.
+- Assert invalid pickup method, path, media type, JSON, field type, and inactive
+  wait never invoke route completion.
+- Assert pickup and timeout racing for one wait generation produce one completion.
+- Assert task cancellation atomically detaches the pending arrival HTTP call.
+- Assert stale task/session callbacks cannot arm or complete a new route leg.
+- Assert malformed or null-containing upstream routes do not preempt a valid wait.
+- Run `:app:testDebugUnitTest` and `:app:assembleDebug`.
+
+Robot integration checks:
+
+- Run a two- or three-point screen delivery and verify bay values and binding order.
+- Verify pickup and five-minute timeout at an intermediate point both start the
+  next route leg.
+- Verify pickup and timeout at the final point both send the existing recall task.
+- Preempt an active wait with a valid upstream route and verify the old timeout,
+  pickup completion, arrival call, and SDK callbacks cannot advance the new route.
+- Destroy and recreate the Activity and verify port `9088` binds to the new instance.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+public void onStateChanged(int state, int schedule) {
+    if (state == Navigation.STATE_DESTINATION) {
+        arrived();
+    }
+}
+```
+
+This callback has no proof that the event belongs to the current task or route
+leg. A delayed destination event can report the wrong point or skip navigation.
+
+#### Correct
+
+```java
+public void onSessionStateChanged(int sessionGeneration, int state, int schedule) {
+    handler.post(() -> {
+        if (sessionGeneration != activeNavigationSessionGeneration) {
+            return;
+        }
+        handleCurrentSessionState(state);
+    });
+}
+```
+
+The immutable callback session token is carried to the serialized consumer and
+validated there. The current leg must also be armed by `STATE_RUNNING` before a
+destination event is accepted.
