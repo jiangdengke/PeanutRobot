@@ -352,3 +352,44 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.11`，`versionCode` 更新为 `22`。
 - `progress.md`：追加本轮预发布记录。
 - 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。
+
+## 2026-07-16 - Task: 修复立即出发后机器人不移动
+### What was done
+- 对比 `v1.0.12-beta.9`、`v1.0.12-beta.10` 和 `v1.0.12-beta.11` 的完整出发链路，确认回归来自 `beta.11` 新增的 SDK 导航实例逐点释放重建。
+- 恢复 `beta.10` 已在机器人上验证的导航启动方式：复用机器人核心初始化时创建的 `PeanutNavigation`，整条路线一次执行 `setTargets()` 和 `prepare()`。
+- 保留屏幕配送的任务代次、当前 SDK 会话代次、预期路线位置和 `STATE_RUNNING` 到达门控，避免未进入运行状态的到达事件推进路线。
+- 中间点 pickup 或五分钟超时后改用既有 `pilotNext()` 和 `readyGo(true)` 继续下一点，不再释放并重建 SDK 导航对象。
+- 增加十秒路线准备超时；未收到 route-prepared 时取消假启动任务、恢复“立即出发”和点位编辑，并提示用户重试。
+- 导航错误回调现在会清理路线准备超时、取消当前屏幕配送并恢复操作状态，不再让按钮永久保持禁用。
+
+### Testing
+- `ReadLints`：`MainActivity.java` 未发现新增 IDE 诊断。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 历史静态对比：`beta.9` 和 `beta.10` 均复用已初始化导航实例，只有 `beta.11` 在出发和点位切换时执行 SDK 对象释放重建。
+- 未连接真实机器人；首次立即出发、中间点 pickup/超时继续和十秒失败提示仍需在目标设备上验证。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：恢复稳定导航实例复用、整路线准备、`pilotNext()` 推进，并增加路线准备超时和错误恢复。
+- `.trellis/spec/backend/navigation-arrival-contract.md`：将屏幕导航契约修正为整路线复用，并记录禁止立即重建 SDK 对象及十秒超时要求。
+- `docs/navigation-arrival-waiting.md`：更新现场流程和导航隔离说明。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录本次启动回归修复与验收标准。
+- `progress.md`：追加本轮修复和验证记录。
+- 回滚方式：执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java .trellis/spec/backend/navigation-arrival-contract.md docs/navigation-arrival-waiting.md .trellis/tasks/07-15-arrival-pickup-waiting/prd.md progress.md`；该命令不会触碰当前 Manifest、NavManager 行尾变化和未跟踪 JPG。
+
+## 2026-07-16 - Task: 发布立即出发导航修复预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.12`，`versionCode` 更新为 `23`。
+- 将导航实例复用、整路线准备、`pilotNext()` 中间点推进和十秒路线准备失败恢复纳入本次预发布。
+- 准备通过 annotated tag `v1.0.12-beta.12` 触发 Android Release 工作流并生成 GitHub 预发布版本。
+
+### Testing
+- `ReadLints`：`MainActivity.java` 未发现新增 IDE 诊断。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`：BUILD SUCCESSFUL。
+- 未连接真实机器人；首次立即出发、中间点 pickup/超时继续和十秒失败恢复仍需在目标设备上验证。
+
+### Notes
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.12`，`versionCode` 更新为 `23`。
+- `progress.md`：追加本轮预发布记录。
+- 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。

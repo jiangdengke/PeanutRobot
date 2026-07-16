@@ -125,6 +125,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final int PICKUP_STATUS_SERVER_PORT = 9088;
     private static final long ARRIVAL_WAIT_TIMEOUT_MS = 5 * 60 * 1000L;
     private static final long DELIVERY_COUNTDOWN_UPDATE_INTERVAL_MS = 1000L;
+    private static final long NAVIGATION_PREPARE_TIMEOUT_MS = 10 * 1000L;
     private static final String DELIVERY_STATUS_QUEUED = "等待配送";
     private static final String DELIVERY_STATUS_TRAVELING = "正在前往";
     private static final String DELIVERY_STATUS_WAITING = "等待取餐";
@@ -214,8 +215,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private boolean navigationTaskActive = false;
     private boolean navigationLegArmed = false;
     private int navigationLegPosition = -1;
+    private int expectedNavigationRoutePosition = -1;
     private int navigationRouteOffset = 0;
     private int arrivalWaitRoutePosition = -1;
+    private Runnable navigationPrepareTimeoutRunnable;
     private Runnable arrivalWaitTimeoutRunnable;
     private Call pendingArrivalReportCall;
     private long arrivalWaitDeadlineElapsedRealtime = 0L;
@@ -2092,28 +2095,59 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         navigationTaskActive = true;
         navigationLegArmed = false;
         navigationLegPosition = -1;
+        expectedNavigationRoutePosition = 0;
 
-        startNavigationSession(screenCompartmentRouteActive);
+        prepareNavigationRoute();
     }
 
-    private void startNavigationSession(boolean singleScreenLeg) {
+    private void prepareNavigationRoute() {
         NavManager navManager = NavManager.getInstance();
-        activeNavigationSessionGeneration = navManager.recreateNavigationSession(
-                singleScreenLeg ? 1 : navManager.getRepeatCount()
-        );
+        activeNavigationSessionGeneration = navManager.getNavigationSessionGeneration();
         peanutNavigation = navManager.getmPeanutNavigation();
-        List<RouteNode> sdkRouteNodes = singleScreenLeg
-                ? new ArrayList<>(routeNodes.subList(
-                        navigationRouteOffset,
-                        navigationRouteOffset + 1
-                ))
-                : routeNodes;
-        peanutNavigation.setTargets(sdkRouteNodes);
+        peanutNavigation.setTargets(new ArrayList<>(routeNodes));
 
         navManager.setSpeed(routeNodes.size()==1
                 ? MmkvUtils.decodeInt("single_point_speed", DEFAULT_NAVIGATION_SPEED)
                 : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED));
+        scheduleNavigationPrepareTimeout(
+                activeNavigationTaskGeneration,
+                activeNavigationSessionGeneration
+        );
         navManager.prepare();
+    }
+
+    private void scheduleNavigationPrepareTimeout(int taskGeneration, int sessionGeneration) {
+        clearNavigationPrepareTimeout();
+        navigationPrepareTimeoutRunnable = () -> handleNavigationPrepareTimeout(
+                taskGeneration,
+                sessionGeneration
+        );
+        handler.postDelayed(navigationPrepareTimeoutRunnable, NAVIGATION_PREPARE_TIMEOUT_MS);
+    }
+
+    private void clearNavigationPrepareTimeout() {
+        Runnable timeoutRunnable = navigationPrepareTimeoutRunnable;
+        navigationPrepareTimeoutRunnable = null;
+        if (timeoutRunnable != null) {
+            handler.removeCallbacks(timeoutRunnable);
+        }
+    }
+
+    private void handleNavigationPrepareTimeout(int taskGeneration, int sessionGeneration) {
+        navigationPrepareTimeoutRunnable = null;
+        if (!isCurrentNavigationTask(taskGeneration)
+                || sessionGeneration != activeNavigationSessionGeneration) {
+            return;
+        }
+        if (screenCompartmentRouteActive) {
+            cancelScreenCompartmentRoute("导航路线准备超时");
+        } else {
+            invalidateNavigationTask("navigation prepare timeout");
+            NavManager.getInstance().stop();
+        }
+        mBinding.tvNavigate.setEnabled(true);
+        flag = "";
+        tip("导航路线准备失败，请重试");
     }
 
     private int getCurrentRoutePosition() {
@@ -2135,8 +2169,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         navigationLegArmed = false;
         navigationLegPosition = -1;
-        navigationRouteOffset = nextPosition;
-        startNavigationSession(true);
+        expectedNavigationRoutePosition = nextPosition;
+        NavManager.getInstance().nextDes();
+        NavManager.getInstance().readyGo(true);
     }
 
     public  List<DestModel.DataBean> getRouteNodesList(){
@@ -2180,7 +2215,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         if (state == Navigation.STATE_RUNNING) {
             int currentPosition = getCurrentRoutePosition();
-            if (!isValidRoutePosition(currentPosition) || isArrivalWaitActive()) {
+            if (!isValidRoutePosition(currentPosition)
+                    || currentPosition != expectedNavigationRoutePosition
+                    || isArrivalWaitActive()) {
                 return;
             }
             navigationLegPosition = currentPosition;
@@ -2256,7 +2293,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         activeNavigationSessionGeneration = -1;
         navigationLegArmed = false;
         navigationLegPosition = -1;
+        expectedNavigationRoutePosition = -1;
         navigationRouteOffset = 0;
+        clearNavigationPrepareTimeout();
         Log.d(TAG, "navigation task invalidated: " + reason
                 + ", generation=" + navigationTaskGeneration);
     }
@@ -2703,6 +2742,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Log.d(TAG, "ignore stale route prepared: session=" + sessionGeneration);
             return;
         }
+        clearNavigationPrepareTimeout();
         Log.d("navigatenext","readyGo=====");
         NavManager.getInstance().readyGo(true);
     }
@@ -2727,7 +2767,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Log.d(TAG, "ignore stale navigation error: session=" + sessionGeneration);
             return;
         }
+        clearNavigationPrepareTimeout();
+        if (screenCompartmentRouteActive) {
+            cancelScreenCompartmentRoute("导航错误：" + code);
+        } else {
+            invalidateNavigationTask("navigation error: " + code);
+        }
         mBinding.tvNavigate.setEnabled(true);
+        tip("导航启动失败，错误码：" + code);
         Log.d("navigatenext","onerror="+code);
         flag="";
     }

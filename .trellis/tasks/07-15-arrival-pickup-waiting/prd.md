@@ -26,7 +26,9 @@
 - 保留 `9095` HTTP 服务，新增独立的 `9088` pickup 接收服务。
 - 到位 HTTP 请求异步发送，不阻塞导航监听线程和主线程。
 - 每次开始新等待时生成新的等待代次；超时回调和 pickup 回调必须只作用于当前代次。
-- 屏幕仓位路线按点位拆成独立 SDK 导航腿；每一腿使用新的导航会话代次，并且只有当前会话先进入 `STATE_RUNNING` 后才接受 `STATE_DESTINATION`。
+- 屏幕仓位路线复用机器人核心初始化时创建的 SDK 导航实例，并将完整路线一次性交给 SDK；每个点到达后暂停，pickup 或超时后通过 `pilotNext()` 继续。
+- 当前预期点位只有先进入 `STATE_RUNNING` 后才接受 `STATE_DESTINATION`，并保留任务和 SDK 会话代次校验。
+- 路线准备十秒内没有完成时取消任务、恢复“立即出发”和点位编辑，并提示重试。
 - 有效 pickup 或五分钟超时都结束当前等待。
 - 当前点不是最后一点时，结束等待后调用现有下一点流程。
 - 当前点是最后一点时，结束等待后调用现有召回能力。
@@ -58,6 +60,13 @@
 - [x] 新上游点位任务、停止任务和 Activity 销毁会取消旧等待。
 - [x] `9095` 现有 HTTP 服务保持可用，`9088/pickup_status` 独立监听。
 - [x] `:app:assembleDebug` 构建通过。
+
+## Navigation Startup Regression Fix
+
+- [x] 恢复 `v1.0.12-beta.10` 已在机器人上验证的导航实例复用方式，不在出发时立即释放并重建 `PeanutNavigation`。
+- [x] 屏幕路线一次完成 `setTargets()` 和 `prepare()`，路线准备成功后继续通过 `readyGo(true)` 启动。
+- [x] 中间点等待完成后通过 `pilotNext()` 和 `readyGo(true)` 前往下一点，不重建 SDK 导航对象。
+- [x] 增加十秒路线准备超时，失败时恢复操作状态并显示重试提示。
 
 ## Delivery Progress UI Extension
 
@@ -96,6 +105,6 @@
 ## Technical Notes
 
 - 主要涉及 `MainActivity` 的导航到位状态、任务抢占和生命周期。
-- 上游完整路线继续复用现有 `NavManager.nextDes()/readyGo(true)`；屏幕仓位路线为隔离迟到 SDK 回调，按点位创建独立导航会话，并继续复用 `sendRecallTask()`。
+- 上游路线和屏幕仓位路线都复用核心初始化后的 SDK 导航实例；屏幕路线通过任务代次、当前会话代次、预期位置和 `STATE_RUNNING` 门控隔离无效回调，并继续复用 `sendRecallTask()`。
 - 应避免复用旧的 20 秒单点返回定时器，防止旧 Runnable 覆盖新任务。
 - 新 HTTP 服务应保持入口校验集中，不把路由解析散落到导航代码。

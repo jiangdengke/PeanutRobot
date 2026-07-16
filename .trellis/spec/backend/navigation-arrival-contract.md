@@ -75,12 +75,17 @@ void onSessionError(int sessionGeneration, int code);
 
 Screen route navigation contract:
 
-- Create a new SDK navigation session for every screen route leg.
-- Preserve the global route position separately from the one-node SDK route.
-- Accept `STATE_DESTINATION` only after the same current SDK session has emitted
-  `STATE_RUNNING` for the expected global route position.
+- Reuse the SDK navigation instance created during robot-core initialization.
+  Do not release and rebuild `PeanutNavigation` at departure or between points;
+  this robot SDK can fail to emit route-prepared after immediate reconstruction.
+- Submit the complete screen route once. Pause at each destination, then call
+  `pilotNext()` and `setPilotWhenReady(true)` after pickup or timeout.
+- Accept `STATE_DESTINATION` only after the current SDK session has emitted
+  `STATE_RUNNING` for the expected route position.
 - Reject callbacks whose session generation or task generation is no longer
   active.
+- If route preparation does not complete within ten seconds, invalidate the
+  task, stop navigation, restore the departure action, and show a retry prompt.
 
 Upstream route preemption contract:
 
@@ -105,17 +110,20 @@ Upstream route preemption contract:
 | Duplicate pickup or timeout loses the claim race | No route progression |
 | Arrival HTTP call belongs to a cancelled wait generation | Cancel or skip the call |
 | Navigation callback carries a stale session generation | Ignore before reading or advancing route state |
+| Route preparation does not complete within ten seconds | Cancel the task, restore editing/departure controls, and prompt retry |
 | Activity is destroyed before queued endpoint work runs | Return without touching UI or SDK objects |
 | Incoming upstream route is invalid | Keep the current screen route and wait unchanged |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: Point A arrives in bay 2, `/nav_arrive` reports `bay: 2`, pickup is
-  accepted once, and a new SDK session starts point B.
+  accepted once, and `pilotNext()` starts point B on the prepared route.
 - Base: No pickup arrives. The five-minute timeout claims the wait and performs
   the same next-point or final-recall decision.
-- Bad: A stale `STATE_DESTINATION` from point A arrives after point B's SDK
-  session starts. Its session generation does not match and it is ignored.
+- Bad: A destination callback arrives before `STATE_RUNNING` arms the expected
+  route position. It is ignored and cannot report arrival or advance the route.
+- Bad: Departure releases the initialized navigation object and immediately
+  rebuilds it. Route preparation never completes, so the robot does not move.
 - Bad: `/robot_task/send_point` contains `[null]`. Validation rejects it before
   cancelling the active screen wait.
 - Protocol limitation: A delayed boolean-only pickup from point A that arrives
@@ -131,7 +139,10 @@ Static and build checks:
   wait never invoke route completion.
 - Assert pickup and timeout racing for one wait generation produce one completion.
 - Assert task cancellation atomically detaches the pending arrival HTTP call.
-- Assert stale task/session callbacks cannot arm or complete a new route leg.
+- Assert stale task/session callbacks and unarmed destination callbacks cannot
+  complete a route position.
+- Assert route preparation timeout restores the departure action and cancels
+  the active screen route.
 - Assert malformed or null-containing upstream routes do not preempt a valid wait.
 - Run `:app:testDebugUnitTest` and `:app:assembleDebug`.
 
@@ -139,7 +150,7 @@ Robot integration checks:
 
 - Run a two- or three-point screen delivery and verify bay values and binding order.
 - Verify pickup and five-minute timeout at an intermediate point both start the
-  next route leg.
+  next route point through `pilotNext()`.
 - Verify pickup and timeout at the final point both send the existing recall task.
 - Preempt an active wait with a valid upstream route and verify the old timeout,
   pickup completion, arrival call, and SDK callbacks cannot advance the new route.
@@ -150,29 +161,28 @@ Robot integration checks:
 #### Wrong
 
 ```java
-public void onStateChanged(int state, int schedule) {
-    if (state == Navigation.STATE_DESTINATION) {
-        arrived();
-    }
-}
+navigation.release();
+navigation = new PeanutNavigation.Builder().build();
+navigation.setTargets(currentPointOnly);
+navigation.prepare();
 ```
 
-This callback has no proof that the event belongs to the current task or route
-leg. A delayed destination event can report the wrong point or skip navigation.
+Releasing and immediately rebuilding the SDK object at departure regressed the
+working start path on the target robot: route preparation did not complete and
+`setPilotWhenReady(true)` was never called.
 
 #### Correct
 
 ```java
-public void onSessionStateChanged(int sessionGeneration, int state, int schedule) {
-    handler.post(() -> {
-        if (sessionGeneration != activeNavigationSessionGeneration) {
-            return;
-        }
-        handleCurrentSessionState(state);
-    });
-}
+navigation.stop();
+navigation.setTargets(completeRouteSnapshot);
+navigation.prepare();
+
+// After an intermediate pickup or timeout:
+navigation.pilotNext();
+navigation.setPilotWhenReady(true);
 ```
 
-The immutable callback session token is carried to the serialized consumer and
-validated there. The current leg must also be armed by `STATE_RUNNING` before a
-destination event is accepted.
+The initialized SDK object is reused, matching the start path verified in
+`v1.0.12-beta.10`. Task/session tokens and the expected-position
+`STATE_RUNNING` gate remain responsible for rejecting invalid progression.
