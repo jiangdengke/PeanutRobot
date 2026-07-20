@@ -393,3 +393,146 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.12`，`versionCode` 更新为 `23`。
 - `progress.md`：追加本轮预发布记录。
 - 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。
+
+## 2026-07-17 - Task: 美化主界面三栏 UI
+### What was done
+- 参考紫色圆角操作卡片，将主界面统一为克制的浅紫主题，保留原有左栏、地图和右侧操作三栏结构。
+- 左栏标签、点位列表、仓位绑定和配送进度统一使用圆角卡片、紧凑间距及清晰的选中、按下、禁用和只读反馈。
+- 中间地图增加独立卡片容器，并按用户确认切换到新的 `root_map.jpg`，使用 `fitCenter` 保留完整地图内容。
+- 右侧操作区增加稳定的 Android Vector 图标和箭头，将“立即出发”设为深紫主操作，其余入口使用白色或浅紫次级卡片。
+- 保留配送前往、等待、完成和取消状态的语义色；导航、HTTP、召回、锁屏、倒计时和仓位绑定业务逻辑均未改变。
+- 独立质量复核补充了页签和点位移除按钮按压反馈，并提高“立即出发”禁用状态的文字与图标对比度。
+
+### Testing
+- `ReadLints`：本轮修改的 Java、布局、颜色和 drawable 资源未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 独立静态复核：View ID、View 类型、点击入口、启用状态和业务文案保持兼容；`MainActivity` 仅调整标签及动态配送卡片的展示代码。
+- 未连接真实机器人；目标横屏文字换行、触控面积、地图留白及系统字体缩放仍需实机验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：将标签和动态配送进度卡片切换为主题化圆角资源。
+- `app/src/main/res/layout/activity_main.xml`：统一三栏卡片布局、操作层级、图标、间距和新地图引用。
+- `app/src/main/res/layout/item_point.xml`：移除固定点位宽度和过大内边距，适配窄左栏卡片布局。
+- `app/src/main/res/values/colors.xml`：增加浅紫主题及配送状态语义色令牌。
+- `app/src/main/res/drawable/circle_cross.xml`：更新点位移除图标并提供清晰危险色语义。
+- `app/src/main/res/drawable/text_view_selector.xml`：更新普通操作卡片的默认、按下、聚焦和禁用状态。
+- `app/src/main/res/drawable/textview_bg_selector.xml`：更新点位与仓位卡片的默认、按下、选中和禁用状态。
+- `app/src/main/res/drawable/panel_surface.xml`：新增三栏通用圆角面板背景。
+- `app/src/main/res/drawable/primary_action_selector.xml`：新增“立即出发”主操作背景状态。
+- `app/src/main/res/drawable/progress_summary_background.xml`：新增摘要与任务状态的浅紫背景。
+- `app/src/main/res/drawable/status_header_background.xml`：新增副屏状态标题背景。
+- `app/src/main/res/drawable/tab_group_background.xml`：新增左栏标签组容器背景。
+- `app/src/main/res/drawable/tab_selected_background.xml`：新增已选标签及按压状态背景。
+- `app/src/main/res/drawable/tab_unselected_background.xml`：新增未选标签及按压状态背景。
+- `app/src/main/res/drawable/delivery_progress_queued.xml`：新增等待配送圆角状态背景。
+- `app/src/main/res/drawable/delivery_progress_traveling.xml`：新增正在前往圆角状态背景。
+- `app/src/main/res/drawable/delivery_progress_waiting.xml`：新增等待取餐圆角状态背景。
+- `app/src/main/res/drawable/delivery_progress_completed.xml`：新增配送完成圆角状态背景。
+- `app/src/main/res/drawable/delivery_progress_problem.xml`：新增超时和取消圆角状态背景。
+- `app/src/main/res/drawable/ic_arrow_right.xml`：新增操作入口右箭头图标。
+- `app/src/main/res/drawable/ic_navigation_start.xml`：新增立即出发图标。
+- `app/src/main/res/drawable/ic_refresh.xml`：新增刷新点位图标。
+- `app/src/main/res/drawable/ic_charge.xml`：新增回充图标。
+- `app/src/main/res/drawable/ic_patrol.xml`：新增巡仓图标。
+- `app/src/main/res/drawable/ic_recall.xml`：新增召回图标。
+- `app/src/main/res/drawable/ic_lock.xml`：新增立即锁屏图标。
+- `app/src/main/res/drawable/ic_settings.xml`：新增锁屏设置图标。
+- `app/src/main/res/drawable/ic_monitor.xml`：新增副屏显示状态图标。
+- `app/src/main/res/drawable/room_map.png`：按用户确认移除旧地图资源。
+- `app/src/main/res/drawable/root_map.jpg`：纳入并展示用户提供的新地图资源。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录整屏 UI 主题、适配边界、地图决策和验收状态。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：使用 IDE Local History 恢复到本轮首次修改 UI 文件之前；若只回滚主题但保留已确认的新地图，恢复布局后继续保留 `@drawable/root_map` 引用且不要删除 `root_map.jpg`。如后续形成独立提交，执行 `git revert <commit>` 回滚该提交。
+
+## 2026-07-20 - Task: 精简仓位绑定卡片文案
+### What was done
+- 隐藏仓位区顶部长期显示的“待绑定”教学提示，不再占用左栏视觉空间。
+- 未绑定仓位只显示仓位编号和加号；选中待绑定点位后，所有空仓位使用紫色描边和浅紫底色表达可绑定状态。
+- 已绑定仓位只显示仓位编号、点位名称和勾选图标，移除“未绑定”“点击绑定”和“点击清空”等重复说明。
+- 为未绑定、可绑定、已绑定、可清空和配送只读状态保留动态无障碍描述；现有临时提示、绑定、清空和配送只读行为均未改变。
+
+### Testing
+- `ReadLints`：`MainActivity.java`、`activity_main.xml` 和两个新增 Vector 图标未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 静态复核：待绑定时只高亮空仓位，配送只读状态不会显示可绑定高亮；点击绑定、点击清空和错误顺序提示继续复用原有路径。
+- 未连接真实机器人；加号、勾选图标和点位名称在目标横屏上的最终比例仍需实机确认。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：将仓位卡片展示改为图标化紧凑状态，并增加动态无障碍描述。
+- `app/src/main/res/layout/activity_main.xml`：隐藏顶部教学提示，并精简三个仓位卡片的初始内容、字号和内边距。
+- `app/src/main/res/drawable/ic_compartment_add.xml`：新增未绑定仓位的加号 Vector 图标。
+- `app/src/main/res/drawable/ic_compartment_check.xml`：新增已绑定仓位的勾选 Vector 图标。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录并完成紧凑仓位卡片的视觉验收标准。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：使用 IDE Local History 恢复到本轮首次修改 `updateCompartmentCard` 之前；当前文件还包含未提交的整屏 UI 改造，禁止直接整文件 `git restore`。如后续形成独立提交，执行 `git revert <commit>` 回滚该提交。
+
+## 2026-07-20 - Task: 调整为先选仓位再选点位
+### What was done
+- 将仓位绑定流程从“先选点位、再点仓位”调整为“先选仓位、再选点位”，当前编辑仓位使用紫色高亮且始终只有一个。
+- 空仓位选择点位后自动完成绑定；已绑定仓位选择其他未占用点位后直接替换，并保留原点位在配送路线中的顺序位置。
+- 已绑定仓位进入编辑后，点击当前绑定点位可解除绑定并保留该空仓位选中状态，便于立即选择替代点位。
+- 未选择仓位时点击点位只显示临时提示；点位已被其他仓位占用时拒绝重复绑定并提示对应仓位。
+- 删除旧的待绑定点位中间状态、点位预选高亮和出发前待绑定检查；开始屏幕配送时清除仓位编辑状态，避免配送结束后恢复陈旧高亮。
+- 配送期间的仓位与点位只读、路线生成、到位上报、等待取餐和召回逻辑均保持不变。
+
+### Testing
+- `ReadLints`：`MainActivity.java` 未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 搜索 `pendingPoint` 及旧的点位优先提示文本：无残留匹配。
+- 静态复核：替换绑定复用旧点位在 `selectedPointList` 中的索引；解绑移除对应点位；跨仓位重复点位不会移动或复制。
+- 未连接真实机器人；仓位切换、替换、解绑和配送顺序仍需在目标设备上完成触控验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加当前编辑仓位状态，并重写仓位选择、点位绑定、替换、解绑、高亮和无障碍描述流程。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录仓位优先绑定规则、配送顺序约束和验收结果。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：使用 IDE Local History 恢复到本轮将 `pendingPoint` 替换为 `activeCompartmentIndex` 之前；当前 `MainActivity.java` 还包含未提交的整屏 UI 改造，禁止直接整文件 `git restore`。如后续形成独立提交，执行 `git revert <commit>` 回滚该提交。
+
+## 2026-07-20 - Task: 重排右侧操作分组
+### What was done
+- 将“立即出发”移动为右侧操作区首项，并与“刷新点位”组成配送操作组。
+- 将“回充、巡仓、召回”连续放置为机器人操作组。
+- 将“副屏显示”移动到下方，与“立即锁屏、锁屏设置”连续组成屏幕操作组。
+- 三组分别按 `2 : 3 : 3` 分配高度，底部任务状态区域保持原有位置和权重。
+- 所有 TextView ID、图标、背景、启用状态、点击事件和业务行为保持不变；“副屏显示”继续保持禁用状态。
+
+### Testing
+- IDE 诊断：`activity_main.xml` 未发现新增诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL。
+- 静态复核：右栏顺序为“立即出发、刷新点位、回充、巡仓、召回、副屏显示、立即锁屏、锁屏设置”，任务状态区仍位于末尾。
+- 未连接真实机器人；三个分组在目标横屏上的间距和整体高度仍需实机确认。
+
+### Notes
+- `app/src/main/res/layout/activity_main.xml`：将右侧操作重组为配送、机器人和屏幕三个连续分组。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录并完成右侧操作分组验收标准。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：使用 IDE Local History 恢复到本轮移动 `tv_secondary_screen_display` 之前；当前布局还包含未提交的整屏 UI 改造，禁止直接整文件 `git restore`。如后续形成独立提交，执行 `git revert <commit>` 回滚该提交。
+
+## 2026-07-20 - Task: 发布主界面 UI 优化预发布版
+### What was done
+- 更新应用版本到 `1.0.12-beta.13`，`versionCode` 更新为 `24`。
+- 将浅紫三栏主题、新室内地图、紧凑仓位卡片、仓位优先绑定和右侧操作分组纳入本次预发布。
+- 同步仓位绑定和三栏地图使用文档，准备通过 annotated tag `v1.0.12-beta.13` 触发 Android Release 工作流并生成 GitHub Pre-release。
+
+### Testing
+- `ReadLints`：本次发布涉及的 Java、布局、drawable、颜色和 Gradle 文件未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`：BUILD SUCCESSFUL。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML、重复权限及废弃 API 警告，没有新增编译错误。
+- 未连接真实机器人；三栏文字密度、仓位触控、地图留白和实际配送流程仍需使用本次预发布 APK 验收。
+
+### Notes
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.13`，`versionCode` 更新为 `24`。
+- `docs/compartment-point-binding.md`：同步仓位优先绑定、替换、解绑、重复占用和配送顺序规则。
+- `docs/room-map-preview.md`：同步新地图资源和右侧三组操作顺序。
+- `progress.md`：追加本轮预发布范围、验证证据、文件清单和回滚点。
+- 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。

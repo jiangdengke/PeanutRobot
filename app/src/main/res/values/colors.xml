@@ -27,4 +27,32 @@
     <color name="grey_light">#F5F5F5</color>  <!-- 浅灰 -->
     <color name="grey_medium">#9E9E9E</color> <!-- 中灰 -->
     <color name="grey_dark">#424242</color>   <!-- 深灰 -->
+
+    <!-- Main screen lilac theme -->
+    <color name="ui_screen_background">#F4F1F8</color>
+    <color name="ui_surface">#FFFEFF</color>
+    <color name="ui_surface_lilac">#F3EDF8</color>
+    <color name="ui_surface_lilac_pressed">#E8DDF2</color>
+    <color name="ui_surface_lilac_selected">#E5D8F2</color>
+    <color name="ui_border">#DED5E8</color>
+    <color name="ui_primary">#5A2F82</color>
+    <color name="ui_primary_pressed">#472268</color>
+    <color name="ui_primary_disabled">#806F90</color>
+    <color name="ui_accent">#76558F</color>
+    <color name="ui_text_primary">#312B3A</color>
+    <color name="ui_text_secondary">#746C7D</color>
+    <color name="ui_icon_secondary">#806B94</color>
+    <color name="ui_danger">#C85B6A</color>
+
+    <!-- Delivery status colors keep their operational meaning. -->
+    <color name="delivery_queued_surface">#F1EEF4</color>
+    <color name="delivery_queued_border">#D9D2DF</color>
+    <color name="delivery_traveling_surface">#E7F2FF</color>
+    <color name="delivery_traveling_border">#9FC7ED</color>
+    <color name="delivery_waiting_surface">#FFF7D9</color>
+    <color name="delivery_waiting_border">#E5C96C</color>
+    <color name="delivery_completed_surface">#E5F5E8</color>
+    <color name="delivery_completed_border">#91C99B</color>
+    <color name="delivery_problem_surface">#FCEAEC</color>
+    <color name="delivery_problem_border">#DEA0A8</color>
 </resources>

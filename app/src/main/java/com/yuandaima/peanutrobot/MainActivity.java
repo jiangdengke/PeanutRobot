@@ -175,7 +175,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private List<MediaModel> mediaModelList = new ArrayList<>();
     private final List<DestModel.DataBean> selectedPointList = new ArrayList<>();
     private final DestModel.DataBean[] compartmentPoints = new DestModel.DataBean[COMPARTMENT_COUNT];
-    private DestModel.DataBean pendingPoint;
+    private int activeCompartmentIndex = -1;
     private TtsUntil ttsUntil;
     private boolean isPermissionRequested;
 
@@ -1224,22 +1224,36 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             refreshPointBindingUi();
             return;
         }
-        if (findSelectedPointIndex(point.getId()) >= 0) {
-            tip("该点位已绑定，请点击对应仓位清空");
+        if (activeCompartmentIndex < 0) {
+            tip("请先选择仓位");
             refreshPointBindingUi();
             return;
         }
-        if (pendingPoint != null && pendingPoint.getId() == point.getId()) {
-            pendingPoint = null;
+
+        int boundCompartmentIndex = findCompartmentIndexByPointId(point.getId());
+        if (boundCompartmentIndex >= 0 && boundCompartmentIndex != activeCompartmentIndex) {
+            tip("该点位已绑定仓位 " + (boundCompartmentIndex + 1));
             refreshPointBindingUi();
             return;
         }
-        if (selectedPointList.size() >= COMPARTMENT_COUNT) {
-            tip("最多绑定三个点位");
+
+        DestModel.DataBean activeBoundPoint = compartmentPoints[activeCompartmentIndex];
+        if (activeBoundPoint != null && activeBoundPoint.getId() == point.getId()) {
+            compartmentPoints[activeCompartmentIndex] = null;
+            removeSelectedPointById(activeBoundPoint.getId());
             refreshPointBindingUi();
             return;
         }
-        pendingPoint = point;
+
+        if (activeBoundPoint != null) {
+            int selectedRouteIndex = findSelectedPointIndex(activeBoundPoint.getId());
+            compartmentPoints[activeCompartmentIndex] = point;
+            selectedPointList.set(selectedRouteIndex, point);
+        } else {
+            compartmentPoints[activeCompartmentIndex] = point;
+            selectedPointList.add(point);
+        }
+        activeCompartmentIndex = -1;
         refreshPointBindingUi();
     }
 
@@ -1251,27 +1265,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             tip("配送进行中，点位和仓位仅供查看");
             return;
         }
-
-        DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
-        if (boundPoint != null) {
-            if (pendingPoint != null) {
-                tip("该仓位已占用，请先清空再绑定");
-                refreshPointBindingUi();
-                return;
-            }
-            compartmentPoints[compartmentIndex] = null;
-            removeSelectedPointById(boundPoint.getId());
-            refreshPointBindingUi();
-            return;
-        }
-
-        if (pendingPoint == null) {
-            tip("请先选择待绑定点位");
-            return;
-        }
-        compartmentPoints[compartmentIndex] = pendingPoint;
-        selectedPointList.add(pendingPoint);
-        pendingPoint = null;
+        activeCompartmentIndex = compartmentIndex;
         refreshPointBindingUi();
     }
 
@@ -1331,9 +1325,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         }
 
-        if (pendingPoint != null) {
-            pendingPoint = findPointById(displayData, pendingPoint.getId());
-        }
     }
 
     private int findCompartmentIndexByPointId(int pointId) {
@@ -1368,6 +1359,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             lastHandledScreenArrivalPosition = -1;
             screenCompartmentRouteActive = true;
         }
+        activeCompartmentIndex = -1;
         createDeliveryProgressSnapshot(routeBaySnapshot);
         showDeliveryProgressView();
         refreshPointBindingUi();
@@ -1415,16 +1407,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void updateDeliveryTabStyles(boolean deliveryProgressSelected) {
-        int selectedBackgroundColor = Color.WHITE;
-        int unselectedBackgroundColor = getResources().getColor(R.color.grey_300);
-        int selectedTextColor = getResources().getColor(R.color.blue);
-        int unselectedTextColor = getResources().getColor(R.color.grey_700);
-        mBinding.tvPointSelectionTab.setBackgroundColor(deliveryProgressSelected
-                ? unselectedBackgroundColor
-                : selectedBackgroundColor);
-        mBinding.tvDeliveryProgressTab.setBackgroundColor(deliveryProgressSelected
-                ? selectedBackgroundColor
-                : unselectedBackgroundColor);
+        int selectedTextColor = ContextCompat.getColor(this, R.color.ui_accent);
+        int unselectedTextColor = ContextCompat.getColor(this, R.color.ui_text_secondary);
+        mBinding.tvPointSelectionTab.setBackgroundResource(deliveryProgressSelected
+                ? R.drawable.tab_unselected_background
+                : R.drawable.tab_selected_background);
+        mBinding.tvDeliveryProgressTab.setBackgroundResource(deliveryProgressSelected
+                ? R.drawable.tab_selected_background
+                : R.drawable.tab_unselected_background);
         mBinding.tvPointSelectionTab.setTextColor(deliveryProgressSelected
                 ? unselectedTextColor
                 : selectedTextColor);
@@ -1463,11 +1453,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             );
             layoutParams.setMargins(0, 0, 0, dp(6));
             progressCard.setLayoutParams(layoutParams);
-            progressCard.setPadding(dp(8), dp(8), dp(8), dp(8));
-            progressCard.setTextColor(getResources().getColor(R.color.grey_900));
+            progressCard.setMinHeight(dp(64));
+            progressCard.setPadding(dp(10), dp(8), dp(10), dp(8));
+            progressCard.setTextColor(ContextCompat.getColor(this, R.color.ui_text_primary));
             progressCard.setTextSize(13);
             progressCard.setGravity(Gravity.CENTER_VERTICAL);
-            progressCard.setBackgroundColor(getDeliveryProgressColor(progressItem.status));
+            progressCard.setBackgroundResource(
+                    getDeliveryProgressBackgroundResource(progressItem.status)
+            );
 
             StringBuilder cardText = new StringBuilder()
                     .append(routePosition + 1)
@@ -1485,21 +1478,21 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
-    private int getDeliveryProgressColor(String status) {
+    private int getDeliveryProgressBackgroundResource(String status) {
         if (DELIVERY_STATUS_TRAVELING.equals(status)) {
-            return Color.parseColor("#BBDEFB");
+            return R.drawable.delivery_progress_traveling;
         }
         if (DELIVERY_STATUS_WAITING.equals(status)) {
-            return Color.parseColor("#FFF9C4");
+            return R.drawable.delivery_progress_waiting;
         }
         if (DELIVERY_STATUS_PICKED_UP.equals(status)) {
-            return Color.parseColor("#C8E6C9");
+            return R.drawable.delivery_progress_completed;
         }
         if (DELIVERY_STATUS_TIMED_OUT.equals(status)
                 || DELIVERY_STATUS_CANCELLED.equals(status)) {
-            return Color.parseColor("#FFCDD2");
+            return R.drawable.delivery_progress_problem;
         }
-        return getResources().getColor(R.color.grey_200);
+        return R.drawable.delivery_progress_queued;
     }
 
     private String formatArrivalWaitCountdown() {
@@ -1531,11 +1524,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private List<DestModel.DataBean> getHighlightedPoints() {
-        List<DestModel.DataBean> highlightedPoints = new ArrayList<>(selectedPointList);
-        if (pendingPoint != null) {
-            highlightedPoints.add(pendingPoint);
-        }
-        return highlightedPoints;
+        return new ArrayList<>(selectedPointList);
     }
 
     private void refreshPointBindingUi() {
@@ -1554,14 +1543,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding.tvCompartment1.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
         mBinding.tvCompartment2.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
         mBinding.tvCompartment3.setAlpha(deliveryRouteIsReadOnly ? 0.65f : 1.0f);
-        if (deliveryRouteIsReadOnly) {
-            mBinding.tvPendingPoint.setText("配送进行中 · 点位和仓位仅供查看");
-        } else if (pendingPoint == null) {
-            mBinding.tvPendingPoint.setText("待绑定：请先点击上方点位");
-        } else {
-            mBinding.tvPendingPoint.setText("待绑定：" + getPointDisplayName(pendingPoint)
-                    + "\n请选择下方空仓位");
-        }
+        mBinding.tvPendingPoint.setVisibility(View.GONE);
         updateCompartmentCard(mBinding.tvCompartment1, 0);
         updateCompartmentCard(mBinding.tvCompartment2, 1);
         updateCompartmentCard(mBinding.tvCompartment3, 2);
@@ -1570,14 +1552,42 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void updateCompartmentCard(TextView compartmentView, int compartmentIndex) {
         String compartmentName = "仓位 " + (compartmentIndex + 1);
         DestModel.DataBean boundPoint = compartmentPoints[compartmentIndex];
+        boolean compartmentIsActive = compartmentIndex == activeCompartmentIndex
+                && !screenCompartmentRouteActive;
+        compartmentView.setSelected(compartmentIsActive);
         if (boundPoint != null) {
-            compartmentView.setText(compartmentName + "\n点位：" + getPointDisplayName(boundPoint)
-                    + "\n无待绑定时点击清空");
-        } else if (pendingPoint != null) {
-            compartmentView.setText(compartmentName + "\n未绑定\n点击绑定："
-                    + getPointDisplayName(pendingPoint));
+            String pointName = getPointDisplayName(boundPoint);
+            compartmentView.setText(compartmentName + "\n" + pointName);
+            compartmentView.setCompoundDrawablesWithIntrinsicBounds(
+                    0, 0, R.drawable.ic_compartment_check, 0
+            );
+            String boundContentDescription = compartmentName + "，已绑定点位" + pointName;
+            if (screenCompartmentRouteActive) {
+                boundContentDescription += "，配送进行中不可编辑";
+            } else if (compartmentIsActive) {
+                boundContentDescription += "，已选择，点击其他点位可替换绑定，点击当前点位可解绑";
+            } else {
+                boundContentDescription += "，点击选择后可替换绑定";
+            }
+            compartmentView.setContentDescription(boundContentDescription);
         } else {
-            compartmentView.setText(compartmentName + "\n未绑定\n先选点位，再点此绑定");
+            compartmentView.setText(compartmentName);
+            compartmentView.setCompoundDrawablesWithIntrinsicBounds(
+                    0, 0, R.drawable.ic_compartment_add, 0
+            );
+            if (screenCompartmentRouteActive) {
+                compartmentView.setContentDescription(
+                        compartmentName + "，未绑定，配送进行中不可编辑"
+                );
+            } else if (compartmentIsActive) {
+                compartmentView.setContentDescription(
+                        compartmentName + "，未绑定，已选择，点击点位即可绑定"
+                );
+            } else {
+                compartmentView.setContentDescription(
+                        compartmentName + "，未绑定，点击选择仓位"
+                );
+            }
         }
     }
 
@@ -1762,10 +1772,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         } else if (id==mBinding.tvNavigate.getId()){
             if (selectedPointList.isEmpty()){
                 tip("请先绑定点位到仓位");
-                return;
-            }
-            if (pendingPoint != null) {
-                tip("请先将待绑定点位放入仓位，或取消选择");
                 return;
             }
             routeNodes = new ArrayList<>();
