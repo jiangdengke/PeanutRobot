@@ -536,3 +536,29 @@
 - `docs/room-map-preview.md`：同步新地图资源和右侧三组操作顺序。
 - `progress.md`：追加本轮预发布范围、验证证据、文件清单和回滚点。
 - 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。
+
+## 2026-07-20 - Task: 修复横屏点位仓位分区与操作图标并发布预发布版
+### What was done
+- 在左侧点位列表和仓位卡片之间增加克制的分隔线及上下留白，避免目标横屏中两个区域视觉重叠或粘连。
+- 将普通右侧操作图标及右箭头改为资源内置深紫灰颜色，不再依赖目标机器人系统对 `TextView` `drawableTint` 的支持。
+- 为“立即出发”保留独立白色右箭头，继续维持主操作与普通操作的视觉层级。
+- 更新应用版本到 `1.0.12-beta.14`，`versionCode` 更新为 `25`，准备通过 annotated tag `v1.0.12-beta.14` 发布 GitHub Pre-release。
+
+### Testing
+- `ReadLints`：本轮涉及的 Gradle、布局和 Vector Drawable 文件未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- 静态检查：普通右侧操作区域无残留 `android:drawableTint`；普通操作图标无残留白色填充或描边；“立即出发”引用独立白色右箭头。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`：BUILD SUCCESSFUL。
+- 构建仅报告项目既有的 Android Gradle Plugin、重复权限及废弃 API 警告，没有新增编译错误。
+- 未连接真实机器人；左侧分区间距和普通图标在目标屏幕上的最终显示效果仍需使用本次预发布 APK 验收。
+
+### Notes
+- `app/src/main/res/layout/activity_main.xml`：分隔点位与仓位区域，移除普通操作图标对 tint 的依赖，并为主操作引用独立白色箭头。
+- `app/src/main/res/drawable/ic_arrow_right.xml`：将普通操作右箭头改为深紫灰颜色。
+- `app/src/main/res/drawable/ic_arrow_right_primary.xml`：新增“立即出发”专用白色右箭头。
+- `app/src/main/res/drawable/ic_refresh.xml`、`ic_charge.xml`、`ic_patrol.xml`、`ic_recall.xml`、`ic_monitor.xml`、`ic_lock.xml`、`ic_settings.xml`：将普通操作图标改为资源内置深紫灰颜色。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录目标机器人实机问题及对应视觉验收结果。
+- `app/build.gradle`：将应用版本更新为 `1.0.12-beta.14`，`versionCode` 更新为 `25`。
+- `progress.md`：追加本轮修复、验证、发布范围和回滚点。
+- 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布后续修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。

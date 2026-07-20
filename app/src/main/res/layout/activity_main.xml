@@ -125,6 +125,15 @@
 
                     </FrameLayout>
 
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginEnd="4dp"
+                        android:layout_marginBottom="6dp"
+                        android:background="@color/ui_border" />
+
                     <androidx.appcompat.widget.LinearLayoutCompat
                         android:id="@+id/ll_left"
                         android:layout_width="match_parent"
@@ -332,9 +341,8 @@
                     android:layout_weight="1"
                     android:background="@drawable/primary_action_selector"
                     android:drawableStart="@drawable/ic_navigation_start"
-                    android:drawableEnd="@drawable/ic_arrow_right"
+                    android:drawableEnd="@drawable/ic_arrow_right_primary"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/white"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -356,7 +364,6 @@
                     android:drawableStart="@drawable/ic_refresh"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -385,7 +392,6 @@
                     android:drawableStart="@drawable/ic_charge"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -407,7 +413,6 @@
                     android:drawableStart="@drawable/ic_patrol"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -429,7 +434,6 @@
                     android:drawableStart="@drawable/ic_recall"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -457,7 +461,6 @@
                     android:background="@drawable/status_header_background"
                     android:drawableStart="@drawable/ic_monitor"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:enabled="false"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
@@ -480,7 +483,6 @@
                     android:drawableStart="@drawable/ic_lock"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
@@ -502,7 +504,6 @@
                     android:drawableStart="@drawable/ic_settings"
                     android:drawableEnd="@drawable/ic_arrow_right"
                     android:drawablePadding="8dp"
-                    android:drawableTint="@color/ui_icon_secondary"
                     android:gravity="center_vertical|start"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"

@@ -7,13 +7,13 @@
     <path
         android:fillColor="@android:color/transparent"
         android:pathData="M18,8 A7,7 0,1 0,19,14"
-        android:strokeColor="@color/white"
+        android:strokeColor="@color/ui_icon_secondary"
         android:strokeLineCap="round"
         android:strokeWidth="2" />
     <path
         android:fillColor="@android:color/transparent"
         android:pathData="M18,4 L18,8 L14,8"
-        android:strokeColor="@color/white"
+        android:strokeColor="@color/ui_icon_secondary"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="2" />
