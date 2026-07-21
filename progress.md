@@ -719,3 +719,20 @@
 - `.trellis/tasks/07-21-map-point-overlay/prd.md`：保留历史需求并按现有证据撤销实机项勾选，记录第二轮修复和 `9098` 明确边界。
 - `progress.md`：仅在末尾追加本轮实现、验证、文件清单和回滚点。
 - 回滚点：本节追加前的未提交工作区状态。回滚本轮时，仅通过 IDE 本地历史反向恢复上述 `MainActivity.java`、PRD、文档和本节，禁止整文件 `git restore` 以免覆盖第一轮及用户改动；新增解析器和测试可在确认无后续依赖后执行 `rm -f app/src/main/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParser.java app/src/test/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParserTest.java` 删除。
+
+## 2026-07-21 - Task: 发布 v1.0.12-beta.15
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.15`，`versionCode` 单调递增为 `26`。
+- 准备通过 annotated tag `v1.0.12-beta.15` 触发 Android Release 工作流，发布地图点位标注、配送进度和任务安全处理能力。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL，单元测试和 Debug APK 构建通过。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `ReadLints`：`app/build.gradle` 未发现 IDE 诊断。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML 版本和 Manifest 重复权限警告；本轮未修改对应配置。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.15`，`versionCode` 更新为 `26`。
+- `progress.md`：追加本次预发布准备、验证证据、文件清单和回滚点。
+- 回滚点：功能提交 `1e4d847`；发布提交完成后优先执行 `git revert <release-commit>` 回退版本号，不回退已完成的地图和配送功能。
