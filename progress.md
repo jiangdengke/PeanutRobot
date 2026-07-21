@@ -562,3 +562,160 @@
 - `app/build.gradle`：将应用版本更新为 `1.0.12-beta.14`，`versionCode` 更新为 `25`。
 - `progress.md`：追加本轮修复、验证、发布范围和回滚点。
 - 回滚方式：如已推送，执行 `git revert <release-commit>` 后发布后续修复版本；删除远端发布标签属于破坏性操作，不作为默认回滚方式。
+
+## 2026-07-20 - Task: 移除主界面手动刷新点位入口
+### What was done
+- 移除主界面右侧“刷新点位”入口、点击处理和仅供该入口使用的刷新图标；配送操作组只保留“立即出发”，并调整为标准单行高度。
+- 保留启动自动读取、读取失败重试、成功更新点位和点位绑定对账行为，自动读取流程改为使用无参刷新方法。
+- 同步 README、地图布局说明和当前任务 PRD，记录移除手动入口、自动流程不变及“立即出发”高度验收结果。
+
+### Testing
+- `ReadLints`：`MainActivity.java`、`activity_main.xml`、`README.md`、`docs/room-map-preview.md` 和当前任务 PRD 未发现 IDE 诊断。
+- 搜索 `tvRefreshPoints`、`tv_refresh_points`、`refreshPointData(true)`、`手动刷新点位`：源码和当前文档无残留；`ic_refresh.xml` 在 `app/src` 中无引用且已删除。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；仅报告项目既有的 Android Gradle Plugin、SDK XML 和废弃 API 警告。
+
+### Notes
+- `app/src/main/res/layout/activity_main.xml`：删除 `tv_refresh_points`，配送操作组权重由 `2` 调整为 `1`。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：删除刷新入口监听和点击分支，保留自动读取与重试并将刷新方法改为无参。
+- `app/src/main/res/drawable/ic_refresh.xml`：删除已无引用的刷新图标资源。
+- `README.md`：改为说明启动自动读取点位及失败重试。
+- `docs/room-map-preview.md`：删除右侧操作顺序中的“刷新点位”。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：追加移除手动入口、自动流程和标准单行高度的决策及已完成验收项。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚方式：在当前目标文件未含其他未提交改动的前提下，执行 `git restore -- README.md docs/room-map-preview.md .trellis/tasks/07-15-arrival-pickup-waiting/prd.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml app/src/main/res/drawable/ic_refresh.xml progress.md`，不会触及本轮无关的 `AndroidManifest.xml`、`NavManager.java` 或根目录 JPG 文件。
+
+## 2026-07-20 - Task: 恢复主界面手动刷新点位入口
+### What was done
+- 根据最终使用需求撤销上一轮未提交的“移除刷新点位”改动，恢复右侧“刷新点位”按钮、深色刷新图标和原有点击处理。
+- 恢复手动刷新过程中的状态重置、结果提示及配送期间刷新拦截；启动自动读取和失败重试逻辑继续保留。
+- 配送操作组恢复为“立即出发、刷新点位”两项，并恢复原有高度分配。
+- 更新当前任务决策，明确最终保留手动刷新入口。
+
+### Testing
+- `ReadLints`：`MainActivity.java`、`activity_main.xml`、`ic_refresh.xml` 和当前任务 PRD 未发现 IDE 诊断。
+- 静态检查：布局包含 `tv_refresh_points` 并引用 `ic_refresh`；Java 同时包含手动 `refreshPointData(true)` 和自动重试 `refreshPointData(false)` 路径。
+- `git diff --exit-code HEAD -- README.md docs/room-map-preview.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml app/src/main/res/drawable/ic_refresh.xml`：通过，业务实现与已发布的 `0017a79` 状态一致。
+- `python3 ./.trellis/scripts/task.py validate 07-15-arrival-pickup-waiting`：通过，实施与检查上下文各 5 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；仅报告项目既有的 Android Gradle Plugin、SDK XML、废弃 API 和未检查操作警告。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：恢复刷新按钮监听、手动刷新分支、结果提示和自动重试参数。
+- `app/src/main/res/layout/activity_main.xml`：恢复“刷新点位”按钮及配送操作组原有高度分配。
+- `app/src/main/res/drawable/ic_refresh.xml`：恢复深紫灰刷新 Vector 图标。
+- `README.md`：恢复手动刷新及启动自动重试能力说明。
+- `docs/room-map-preview.md`：恢复右侧“立即出发、刷新点位”操作顺序说明。
+- `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`：记录最终保留手动刷新入口及配送期间拦截规则。
+- `progress.md`：追加本轮回退、验证证据、文件清单和回滚点。
+- 回滚点：业务实现已精确恢复到提交 `0017a79`；如本轮后续形成独立提交，执行 `git revert <rollback-commit>` 可重新撤销本轮恢复。
+
+## 2026-07-21 - Task: 规划地图点位标注与联动
+### What was done
+- 确认中间地图采用等比例铺满并允许少量上下裁切，不使用拉伸变形。
+- 确认使用独立透明图层绘制地图点位，以机器人点位 ID、地图比例坐标和自定义名称建立映射。
+- 确认通过长按地图并验证现有锁屏密码进入本地编辑模式，支持新增、拖动、改名、重新关联、删除、保存和取消。
+- 确认正常模式显示全部小圆点并突出当前点位；未选择仓位时点击左侧点位只聚焦地图，选择仓位后同时执行原有绑定流程。
+- 将第一版收敛为地图铺满、点位编辑和左侧联动，暂不加入地图反向选择、配送状态或配置导入导出。
+
+### Testing
+- 只完成方案讨论和代码结构检查，未修改 Android 业务代码，因此未执行运行时构建验收。
+- 检查当前地图布局：中间区域为 `FrameLayout + ImageView`，可以叠加独立标注层。
+- 检查当前点位模型：机器人点位包含稳定 ID 和名称，可以使用 ID 建立地图映射。
+- `sips -g pixelWidth -g pixelHeight app/src/main/res/drawable/root_map.jpg`：确认地图尺寸为 `1202 x 1026`，与目标横屏中间区域比例不同，等比例完整显示会产生留白。
+
+### Notes
+- `.trellis/tasks/07-21-map-point-overlay/task.json`：新增地图点位标注与联动规划任务元数据。
+- `.trellis/tasks/07-21-map-point-overlay/implement.jsonl`：创建后续实施上下文占位文件，尚未进入实施阶段。
+- `.trellis/tasks/07-21-map-point-overlay/check.jsonl`：创建后续检查上下文占位文件，尚未进入实施阶段。
+- `.trellis/tasks/07-21-map-point-overlay/prd.md`：记录目标、方案比较、已确认决策、MVP 范围和验收标准。
+- `progress.md`：追加本轮方案讨论、检查依据、文件清单和回滚点。
+- 回滚点：删除 `.trellis/tasks/07-21-map-point-overlay/` 并移除本节，可完整撤销本轮规划文档；本轮未改 Android 业务代码。
+
+## 2026-07-21 - Task: 实现地图点位标注与联动
+### What was done
+- 中间地图移除内部白边并改为等比例铺满，新增与底图共用 `centerCrop` 缩放和裁切偏移的独立标注层，以原图归一化坐标绘制和反算触摸位置。
+- 新增带地图版本、机器人点位 ID、自定义名称、归一化坐标和启用状态的本地配置，通过现有 MMKV 和 Gson 保存；版本不匹配、JSON 损坏、坐标越界、重复映射和机器人点位缺失均安全忽略并记录日志。
+- 左侧点位点击先更新地图聚焦；未选择仓位时不再提示先选仓位且不修改路线，已选择仓位时继续原有绑定、替换、解绑和重复占用校验，未映射点位不阻断配送。
+- 实现长按地图约三秒并验证现有锁屏密码的编辑入口，配送中禁止进入；编辑工具条支持新增、拖动、点击移动、改名、重新关联、删除、保存和取消，取消使用深拷贝工作副本恢复已保存配置。
+- 同步地图使用文档和任务验收状态，保留目标机器人铺满效果与关键区域裁切的实机视觉验收未勾选。
+
+### Testing
+- `ReadLints`：新增及修改的 Java、单元测试和 `activity_main.xml` 未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- 搜索 `app/src/main` 中的“请先选择仓位”：无匹配，新点位点击路径不再以仓位选择阻断地图浏览。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；新增单元测试覆盖 Gson 配置往返、取消编辑所依赖的深拷贝隔离，以及 `centerCrop` 正反坐标变换和边界约束。
+- 静态复核：保存配置强制 `root_map_v1`、机器人点位 ID 唯一和有效坐标；取消仅丢弃编辑工作副本；重新关联和保存均拒绝重复机器人点位；长按入口及密码确认后再次检查配送状态；绘制和触摸反算统一使用同一 `scale/translation`。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML、废弃 API 和未检查操作警告；未连接目标机器人，地图关键区域裁切、工具条密度、标注拖动手感和完整配送流程仍需实机验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/bean/MapPointConfig.java`：新增地图版本和机器人点位标注持久化模型及深拷贝工作副本能力。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapper.java`：新增纯 Java 的 `centerCrop` 缩放、偏移、正向绘制和反向触摸坐标换算。
+- `app/src/main/java/com/yuandaima/peanutrobot/view/MapPointOverlayView.java`：新增正常标注绘制、聚焦定位标记、三秒长按入口和编辑点击/拖动交互层。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：集成 MMKV/Gson 配置保护、左侧点位聚焦、密码验证、编辑工作副本、工具条操作及配送状态隔离。
+- `app/src/main/res/layout/activity_main.xml`：移除地图内部白边，改为 `centerCrop`，叠加标注层和默认隐藏的编辑工具条。
+- `app/src/test/java/com/yuandaima/peanutrobot/bean/MapPointConfigTest.java`：新增配置 JSON 往返和编辑副本隔离测试。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapperTest.java`：新增宽屏裁切、坐标往返和触摸边界测试。
+- `docs/room-map-preview.md`：说明地图铺满、标注显示、长按密码编辑、保存位置和当前限制。
+- `.trellis/tasks/07-21-map-point-overlay/prd.md`：勾选代码和自动验证已支持的 MVP 验收项，保留目标机器人视觉验收未完成。
+- `progress.md`：追加本轮实现、验证、文件清单和回滚点。
+- 回滚方式：确认上述目标文件未叠加后续改动后，执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml docs/room-map-preview.md`，再执行 `rm -f app/src/main/java/com/yuandaima/peanutrobot/bean/MapPointConfig.java app/src/main/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapper.java app/src/main/java/com/yuandaima/peanutrobot/view/MapPointOverlayView.java app/src/test/java/com/yuandaima/peanutrobot/bean/MapPointConfigTest.java app/src/test/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapperTest.java`；由于任务 PRD 和 `progress.md` 含本轮开始前的本地记录，仅移除本轮 PRD 勾选变更和本节，禁止整文件还原。若后续形成独立提交，优先执行 `git revert <commit>`。
+
+## 2026-07-21 - Task: 修复地图点位审查问题
+### What was done
+- 建立统一机器人任务忙碌判断，补齐长按和密码确认双重检查、编辑模式五个右侧任务入口拦截，以及有效上游点位/回充任务抢占前丢弃未保存工作副本。
+- 地图配置保存改为使用 MMKV boolean 写入结果，只有成功才替换已保存状态并退出；失败或异常保留当前编辑工作副本和工具栏。
+- 修正 `centerCrop` 触摸反算为 View 可见区域边界，抽取纯 Java 配置清洗器以过滤 disabled、无效坐标和重复 ID，并补齐边界单元测试。
+- 收紧全部点位已映射时的新建状态，并为地图标签增加顶部不足下移、纵向限制和超长名称省略。
+- 同步任务验收和地图使用文档，目标机器人视觉验收继续保持未完成。
+
+### Testing
+- `ReadLints`：本轮涉及的 Java、单元测试及 `activity_main.xml` 未发现 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；测试覆盖宽 View 上下可见边界和越界、窄高 View 左右可见边界和越界、非中心点往返，以及配置版本、null、NaN/Infinity、越界、disabled 和重复 ID 清洗。
+- 静态搜索与复核：五个 UI 入口均调用编辑拦截；两个有效 HTTP 任务入口均在执行前调用工作副本丢弃；长按、密码确认和最终进入共用统一忙碌判断；MMKV false 分支在替换 saved config 和退出编辑之前返回；后续映射查找使用启用且坐标有效判断；触摸坐标先 clamp 到 View 宽高再反算。
+- 保护文件复核：`AndroidManifest.xml`、`NavManager.java`、前序任务 PRD 和根目录 JPG 的 SHA-256 与施工前一致，未被本轮修改。
+- 未连接目标机器人；上游任务抢占时序、MMKV 真实写盘失败反馈、标签在目标屏幕边缘的视觉效果和地图关键区域裁切仍需实机验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：补齐任务与编辑互斥、上游抢占、保存真实性、配置清洗复用和全部点位已配置状态。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java`：新增直接返回 MMKV 写入结果的字符串保存接口，不改变现有 `encode` 调用。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapper.java`：保存 View 尺寸并将反向触摸坐标限制到当前可见区域。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/MapPointConfigSanitizer.java`：新增不依赖 Android 的地图配置清洗和有效标注判断。
+- `app/src/main/java/com/yuandaima/peanutrobot/view/MapPointOverlayView.java`：限制标签宽高、顶部不足时下移并省略超长显示名。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/CenterCropCoordinateMapperTest.java`：更新可见裁切边界、越界和非中心点往返测试。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/MapPointConfigSanitizerTest.java`：新增版本、空值、非有限数、越界、disabled 和重复 ID 清洗测试。
+- `docs/room-map-preview.md`：同步任务互斥、上游抢占和 MMKV 保存失败行为。
+- `.trellis/tasks/07-21-map-point-overlay/prd.md`：补充并勾选代码和测试可证明的审查修复项，保留目标机器人视觉项未勾选。
+- `progress.md`：在末尾追加本轮实现、验证证据、精确文件清单和回滚点。
+- 回滚点：本节之前的工作区状态。由于 `MainActivity.java`、地图视图/坐标文件、任务 PRD、文档和 `progress.md` 已包含前序未提交工作，回滚本轮时应通过 IDE 本地历史仅恢复上述文件到本轮开始时版本，禁止整文件 `git restore`；确认没有后续改动后，可执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java` 并执行 `rm -f app/src/main/java/com/yuandaima/peanutrobot/util/MapPointConfigSanitizer.java app/src/test/java/com/yuandaima/peanutrobot/util/MapPointConfigSanitizerTest.java` 回退本轮独立新增项。
+
+## 2026-07-21 - Task: 闭环地图点位任务状态与输入校验
+### What was done
+- 将上游回充请求解析抽取为不依赖 Android 的正整数充电桩 ID 解析器，在进入 UI 线程和抢占地图编辑前完成 Gson 解析及完整结构校验；无效输入和充电模块未就绪均保留编辑状态，只有合法请求才激活并执行回充。
+- 上游 `send_point` 最后一点在完成消息和任务标记可用后结束统一导航活动状态；状态上报 WebSocket 不可用或发送异常时记录日志，但仍清理本地导航状态、标记并恢复按钮。
+- Activity 销毁时终止待确认仓库 WebSocket，清除 `warehouseTaskPending`，取消并关闭该 Activity 自有 OkHttp dispatcher、executor 和连接池；仓库任务成功、失败、状态、加载和清理 Runnable 在访问 binding 前统一检查销毁状态。
+- 地图编辑标注改名时同步刷新标注 Spinner 完整名称；新建标注仅列出未映射点位，所有点位均已映射时清空陈旧选择、禁用输入并显示明确状态，已有标注仍可选择全部点位重新关联。
+- 收紧 PRD 和使用文档的可验证边界：`9098` 巡仓/回充/召回互斥仅覆盖请求发送和等待确认期间，不承诺无法权威检测的外部执行期，也不新增永久锁、猜测超时或未知 SDK code 解锁。
+
+### Testing
+- `ReadLints`：`MainActivity.java`、新增解析器及单元测试和现有 `activity_main.xml` 未发现 IDE 诊断。
+- `./gradlew :app:testDebugUnitTest --tests com.yuandaima.peanutrobot.util.UpstreamChargeTaskParserTest --no-daemon`：BUILD SUCCESSFUL；覆盖合法正整数及首尾空格、malformed JSON、空对象、null/空 data、null 首项、空白 ID、非数字、0 和负数，解析异常不向调用方抛出。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；仅报告项目既有的 Android Gradle Plugin 与 SDK XML 版本警告。
+- 静态复核：无效回充在设置 active、丢弃编辑和进入 UI 线程前返回，charger null 同样在抢占前返回；合法回充才激活并执行；`send_point` 最终点保持屏幕配送早返回和中间点 `nextDes()` 不变，并调用统一导航失效；仓库任务 UI Runnable 均有销毁检查且 `onDestroy()` 不在 destroyed 状态下更新配送 binding；Spinner 改名即时同步，新建无可用点时不再显示旧点位。
+- 保护范围复核：本轮未写入、还原或删除 `AndroidManifest.xml`、`NavManager.java`、根目录 JPG 和 `.trellis/tasks/07-15-arrival-pickup-waiting/prd.md`，这些文件保留施工前已有工作区状态。
+- 未连接目标机器人；仍需实机验证上游 HTTP 抢占与 charger 未就绪提示、最终点 WebSocket 回传、销毁中的 `9098` 请求、Spinner 视觉与输入光标、配置保存后重启、目标横屏裁切和完整屏幕配送流程。`9098` 外部任务执行期互斥不在当前可验证 MVP 内。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：复用上游回充解析器，闭环导航完成状态和仓库网络销毁，修复地图编辑 Spinner 陈旧显示。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParser.java`：新增无 Android 依赖且不向调用方抛异常的正整数充电桩 ID 解析器。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParserTest.java`：新增上游回充合法及完整无效输入矩阵单元测试。
+- `docs/room-map-preview.md`：同步有效上游任务抢占规则、Spinner 状态及 `9098` 请求确认阶段互斥边界。
+- `.trellis/tasks/07-21-map-point-overlay/prd.md`：保留历史需求并按现有证据撤销实机项勾选，记录第二轮修复和 `9098` 明确边界。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单和回滚点。
+- 回滚点：本节追加前的未提交工作区状态。回滚本轮时，仅通过 IDE 本地历史反向恢复上述 `MainActivity.java`、PRD、文档和本节，禁止整文件 `git restore` 以免覆盖第一轮及用户改动；新增解析器和测试可在确认无后续依赖后执行 `rm -f app/src/main/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParser.java app/src/test/java/com/yuandaima/peanutrobot/util/UpstreamChargeTaskParserTest.java` 删除。

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有锁屏密码、MMKV、点位列表和仓位绑定入口，避免创建重复状态源。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"约束点位数据、持久化配置、地图坐标变换和界面联动之间的数据契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"保持新增视图、配置模型和交互代码范围清晰并具备可验证边界。"}
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"确保地图聚焦和编辑状态不改变现有仓位配送、到位等待和导航会话规则。"}

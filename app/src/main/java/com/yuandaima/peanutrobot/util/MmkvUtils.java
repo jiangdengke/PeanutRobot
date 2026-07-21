@@ -47,6 +47,10 @@ public class MmkvUtils {
         }
     }
 
+    public static boolean saveString(String key, String value) {
+        return mv.encode(key, value);
+    }
+
     public static void encodeSet(String key, Set<String> sets) {
         mv.encode(key, sets);
     }

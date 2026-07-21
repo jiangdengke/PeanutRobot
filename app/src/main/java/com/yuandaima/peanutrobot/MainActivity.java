@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.hardware.display.DisplayManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
@@ -23,14 +24,18 @@ import android.os.SystemClock;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.TextUtils;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -67,10 +72,10 @@ import com.keenon.sdk.hedera.model.ApiError;
 import com.yuandaima.peanutrobot.adapter.MediaAdapter;
 import com.yuandaima.peanutrobot.adapter.PointAdapter;
 import com.yuandaima.peanutrobot.bean.BannerModel;
-import com.yuandaima.peanutrobot.bean.ChargeModel;
 import com.yuandaima.peanutrobot.bean.DestModel;
 import com.yuandaima.peanutrobot.bean.InfoModel;
 import com.yuandaima.peanutrobot.bean.MediaModel;
+import com.yuandaima.peanutrobot.bean.MapPointConfig;
 import com.yuandaima.peanutrobot.bean.MyPoint;
 import com.yuandaima.peanutrobot.bean.ScreenModel;
 import com.yuandaima.peanutrobot.databinding.ActivityMainBinding;
@@ -85,8 +90,11 @@ import com.yuandaima.peanutrobot.server.PickupStatusServer;
 import com.yuandaima.peanutrobot.server.WebServer;
 import com.yuandaima.peanutrobot.server.WebSocketService;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
+import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
 import com.yuandaima.peanutrobot.util.TtsUntil;
+import com.yuandaima.peanutrobot.util.UpstreamChargeTaskParser;
+import com.yuandaima.peanutrobot.view.MapPointOverlayView;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -96,9 +104,11 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import fi.iki.elonen.NanoHTTPD;
@@ -152,6 +162,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
     private static final String KEY_IDLE_LOCK_PASSWORD = "idle_lock_password";
+    private static final String KEY_MAP_POINT_CONFIG = "room_map_point_config";
+    private static final String ROOM_MAP_VERSION = "root_map_v1";
     private static final String DEFAULT_IDLE_LOCK_PASSWORD = "123456";
     private static final String IDLE_IMAGE_MODE_FIT = "fit";
     private static final String IDLE_IMAGE_MODE_FILL = "fill";
@@ -188,6 +200,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final Object arrivalWaitLock = new Object();
     private final Map<Integer, Integer> screenRouteBayByPointId = new HashMap<>();
     private final List<DeliveryProgressItem> deliveryProgressItems = new ArrayList<>();
+    private final Gson mapConfigGson = new Gson();
+    private final Set<Integer> loggedMissingMapPointIds = new HashSet<>();
+    private final List<MapMarkerChoice> mapMarkerChoices = new ArrayList<>();
+    private final List<RobotPointChoice> mapRobotPointChoices = new ArrayList<>();
     Handler handler = new Handler(Looper.getMainLooper());
     private boolean idleLocked = false;
     private boolean unlockDialogShowing = false;
@@ -196,6 +212,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private volatile boolean activityDestroyed = false;
     private boolean pointUiBound = false;
     private boolean warehouseTaskPending = false;
+    private volatile boolean upstreamChargeTaskActive = false;
     private boolean startupGoChargeSent = false;
     private String pendingWarehouseTaskName = "";
     private WebSocket pendingWarehouseTaskWebSocket;
@@ -213,6 +230,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private int activeNavigationTaskGeneration = 0;
     private int activeNavigationSessionGeneration = -1;
     private boolean navigationTaskActive = false;
+    private boolean mapPointOverlayInitialized = false;
+    private boolean mapEditMode = false;
+    private boolean mapEditPasswordDialogShowing = false;
+    private boolean mapEditorUpdatingControls = false;
     private boolean navigationLegArmed = false;
     private int navigationLegPosition = -1;
     private int expectedNavigationRoutePosition = -1;
@@ -221,6 +242,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private Runnable navigationPrepareTimeoutRunnable;
     private Runnable arrivalWaitTimeoutRunnable;
     private Call pendingArrivalReportCall;
+    private Integer focusedMapRobotPointId;
+    private MapPointConfig savedMapPointConfig;
+    private MapPointConfig editingMapPointConfig;
+    private MapPointConfig.Marker currentEditingMapMarker;
+    private ArrayAdapter<MapMarkerChoice> mapMarkerChoiceAdapter;
+    private ArrayAdapter<RobotPointChoice> mapRobotPointChoiceAdapter;
     private long arrivalWaitDeadlineElapsedRealtime = 0L;
     private String deliveryProgressSummary = "暂无配送任务";
     private final Runnable deliveryCountdownRunnable = new Runnable() {
@@ -248,13 +275,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final Runnable warehouseTaskTimeoutRunnable = new Runnable() {
         @Override
         public void run() {
+            if (activityDestroyed) {
+                return;
+            }
             handleWarehouseTaskFailure(pendingWarehouseTaskName, "接口响应超时");
         }
     };
     private final Runnable warehouseTaskLoadingRunnable = new Runnable() {
         @Override
         public void run() {
-            if (!warehouseTaskPending || TextUtils.isEmpty(pendingWarehouseTaskName)) {
+            if (activityDestroyed
+                    || !warehouseTaskPending
+                    || TextUtils.isEmpty(pendingWarehouseTaskName)) {
                 return;
             }
             warehouseTaskLoadingStep = (warehouseTaskLoadingStep + 1) % 4;
@@ -275,6 +307,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final Runnable warehouseTaskStatusClearRunnable = new Runnable() {
         @Override
         public void run() {
+            if (activityDestroyed) {
+                return;
+            }
             mBinding.tvWarehouseTaskStatus.setText("");
         }
     };
@@ -311,6 +346,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(mBinding.getRoot());
         mInitView();
+        initializeMapPointOverlay();
         initListener();
         initIdleLock();
         requestPermission();
@@ -852,20 +888,32 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                             Log.d("MyServer","url=="+url+",text=="+text);
                             switch (url){
                                 case "/robot_task/go_to_charge":
-                                    ChargeModel chargeModel = new Gson().fromJson(text, new TypeToken<ChargeModel>(){}.getType());
-                                    Log.d("Charger===","ChargeModel=="+new Gson().toJson(chargeModel));
+                                    Integer upstreamPileId =
+                                            UpstreamChargeTaskParser.parsePositivePileId(text);
+                                    if (upstreamPileId == null) {
+                                        Log.w(TAG, "ignore invalid upstream go_to_charge task");
+                                        break;
+                                    }
                                     runOnUiThread(() -> {
                                         if (activityDestroyed) {
                                             return;
                                         }
+                                        PeanutCharger availableCharger = mPeanutCharger;
+                                        if (availableCharger == null) {
+                                            Log.w(TAG, "ignore upstream go_to_charge: charger unavailable");
+                                            tip("充电模块未就绪，已忽略上游回充任务");
+                                            return;
+                                        }
+                                        upstreamChargeTaskActive = true;
+                                        discardMapEditingForPreemptingTask("HTTP 回充任务");
                                         cancelScreenCompartmentRoute("HTTP 回充任务");
                                         mBinding.tvNavigate.setEnabled(true);
                                         flag="go_to_charge";
                                         NavManager.getInstance().stop();
                                         //   NavManager.getInstance().release();
-                                        mPeanutCharger.setPile(Integer.parseInt(chargeModel.getData().get(0).getId()));
-                                        mPeanutCharger.execute();
-                                        mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_AUTO);
+                                        availableCharger.setPile(upstreamPileId);
+                                        availableCharger.execute();
+                                        availableCharger.performAction(PeanutCharger.CHARGE_ACTION_AUTO);
                                     });
                                     break;
                                 case "/robot_task/send_point":
@@ -898,6 +946,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         if (activityDestroyed) {
                                             return;
                                         }
+                                        upstreamChargeTaskActive = false;
+                                        discardMapEditingForPreemptingTask("上游 send_point 任务");
                                         cancelScreenCompartmentRoute("上游 send_point 抢占");
                                         if (mPeanutCharger!=null){
                                             Log.d("navigatenext","CHARGE_ACTION_STOP");
@@ -1126,6 +1176,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //  mAdapter= new PointAdapter(testData);
         updateCompartmentUi();
         mAdapter.setTtsUtil(ttsUntil);
+        if (mapPointOverlayInitialized) {
+            if (mapEditMode) {
+                refreshMapEditorControls(currentEditingMapMarker);
+            }
+            refreshMapPointOverlay();
+        }
     }
 
     private List<DestModel.DataBean> getDisplayPointData() {
@@ -1219,13 +1275,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (point == null) {
             return;
         }
+        if (mapEditMode) {
+            tip("地图编辑中，请先保存或取消");
+            refreshPointBindingUi();
+            return;
+        }
+        focusMapPoint(point);
         if (screenCompartmentRouteActive) {
             tip("配送进行中，点位和仓位仅供查看");
             refreshPointBindingUi();
             return;
         }
         if (activeCompartmentIndex < 0) {
-            tip("请先选择仓位");
             refreshPointBindingUi();
             return;
         }
@@ -1259,6 +1320,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void handleCompartmentClick(int compartmentIndex) {
         if (compartmentIndex < 0 || compartmentIndex >= compartmentPoints.length) {
+            return;
+        }
+        if (mapEditMode) {
+            tip("地图编辑中，请先保存或取消");
             return;
         }
         if (screenCompartmentRouteActive) {
@@ -1595,6 +1660,751 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         return TextUtils.isEmpty(point.getName()) ? String.valueOf(point.getId()) : point.getName();
     }
 
+    private void initializeMapPointOverlay() {
+        savedMapPointConfig = loadMapPointConfig();
+        Drawable mapDrawable = mBinding.ivRoomMap.getDrawable();
+        if (mapDrawable != null
+                && mapDrawable.getIntrinsicWidth() > 0
+                && mapDrawable.getIntrinsicHeight() > 0) {
+            mBinding.mapPointOverlay.setSourceImageSize(
+                    mapDrawable.getIntrinsicWidth(),
+                    mapDrawable.getIntrinsicHeight()
+            );
+        } else {
+            Log.e(TAG, "地图资源尺寸无效，标注层将保持隐藏");
+        }
+
+        mBinding.mapPointOverlay.setOnMapEditEntryListener(this::requestMapEditEntry);
+        mBinding.mapPointOverlay.setOnMarkerInteractionListener(
+                new MapPointOverlayView.OnMarkerInteractionListener() {
+                    @Override
+                    public void onMarkerSelected(int robotPointId) {
+                        selectMapMarkerFromOverlay(robotPointId);
+                    }
+
+                    @Override
+                    public void onMarkerPositionChanged(
+                            int robotPointId,
+                            float normalizedX,
+                            float normalizedY
+                    ) {
+                        updateEditingMapMarkerPosition(robotPointId, normalizedX, normalizedY);
+                    }
+                }
+        );
+
+        mapMarkerChoiceAdapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                mapMarkerChoices
+        );
+        mapMarkerChoiceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        mBinding.spinnerMapMarker.setAdapter(mapMarkerChoiceAdapter);
+        mBinding.spinnerMapMarker.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(
+                            AdapterView<?> parent,
+                            View selectedView,
+                            int position,
+                            long rowId
+                    ) {
+                        if (!mapEditorUpdatingControls
+                                && position >= 0
+                                && position < mapMarkerChoices.size()) {
+                            MapPointConfig.Marker selectedMarker =
+                                    mapMarkerChoices.get(position).marker;
+                            if (selectedMarker != currentEditingMapMarker) {
+                                selectMapEditorMarker(selectedMarker);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {
+                    }
+                }
+        );
+
+        mapRobotPointChoiceAdapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                mapRobotPointChoices
+        );
+        mapRobotPointChoiceAdapter.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item
+        );
+        mBinding.spinnerMapRobotPoint.setAdapter(mapRobotPointChoiceAdapter);
+        mBinding.spinnerMapRobotPoint.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(
+                            AdapterView<?> parent,
+                            View selectedView,
+                            int position,
+                            long rowId
+                    ) {
+                        if (!mapEditorUpdatingControls
+                                && position >= 0
+                                && position < mapRobotPointChoices.size()) {
+                            selectMapEditorRobotPoint(mapRobotPointChoices.get(position).point);
+                        }
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {
+                    }
+                }
+        );
+
+        mBinding.etMapMarkerName.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(
+                    CharSequence sequence,
+                    int start,
+                    int count,
+                    int after
+            ) {
+            }
+
+            @Override
+            public void onTextChanged(
+                    CharSequence sequence,
+                    int start,
+                    int before,
+                    int count
+            ) {
+                if (!mapEditorUpdatingControls && currentEditingMapMarker != null) {
+                    currentEditingMapMarker.setDisplayName(sequence.toString().trim());
+                    refreshCurrentMapMarkerChoiceLabel();
+                    refreshMapPointOverlay();
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+            }
+        });
+        mBinding.btMapMarkerDelete.setOnClickListener(view -> deleteCurrentMapMarker());
+        mBinding.btMapEditSave.setOnClickListener(view -> saveMapEditing());
+        mBinding.btMapEditCancel.setOnClickListener(view -> cancelMapEditing());
+        mBinding.llMapEditToolbar.setVisibility(View.GONE);
+        mBinding.mapPointOverlay.setEditMode(false);
+        mapPointOverlayInitialized = true;
+        refreshMapPointOverlay();
+    }
+
+    private MapPointConfig loadMapPointConfig() {
+        String serializedConfig = MmkvUtils.decodeString(KEY_MAP_POINT_CONFIG);
+        if (TextUtils.isEmpty(serializedConfig)) {
+            return new MapPointConfig(ROOM_MAP_VERSION);
+        }
+        try {
+            MapPointConfig parsedConfig = mapConfigGson.fromJson(
+                    serializedConfig,
+                    MapPointConfig.class
+            );
+            if (parsedConfig == null || !ROOM_MAP_VERSION.equals(parsedConfig.getMapVersion())) {
+                String storedVersion = parsedConfig == null ? "null" : parsedConfig.getMapVersion();
+                Log.w(TAG, "忽略地图版本不匹配的点位配置: " + storedVersion);
+                return MapPointConfigSanitizer.sanitize(parsedConfig, ROOM_MAP_VERSION);
+            }
+
+            int storedMarkerCount = parsedConfig.getMarkers().size();
+            MapPointConfig sanitizedConfig = MapPointConfigSanitizer.sanitize(
+                    parsedConfig,
+                    ROOM_MAP_VERSION
+            );
+            if (sanitizedConfig.getMarkers().size() != storedMarkerCount) {
+                Log.w(TAG, "已忽略 disabled、坐标无效或重复的地图标注");
+            }
+            return sanitizedConfig;
+        } catch (RuntimeException exception) {
+            Log.e(TAG, "地图点位配置损坏，已忽略", exception);
+            return new MapPointConfig(ROOM_MAP_VERSION);
+        }
+    }
+
+    private boolean hasValidNormalizedCoordinates(MapPointConfig.Marker marker) {
+        return MapPointConfigSanitizer.hasValidNormalizedCoordinates(marker);
+    }
+
+    private void refreshMapPointOverlay() {
+        if (!mapPointOverlayInitialized) {
+            return;
+        }
+        MapPointConfig activeConfig = mapEditMode ? editingMapPointConfig : savedMapPointConfig;
+        List<MapPointConfig.Marker> displayMarkers = getDisplayableMapMarkers(activeConfig, true);
+        mBinding.mapPointOverlay.setMarkers(displayMarkers);
+        if (!mapEditMode) {
+            if (focusedMapRobotPointId != null
+                    && !containsMapMarker(displayMarkers, focusedMapRobotPointId)) {
+                focusedMapRobotPointId = null;
+            }
+            mBinding.mapPointOverlay.setFocusedRobotPointId(focusedMapRobotPointId);
+            mBinding.mapPointOverlay.setEditingRobotPointId(null);
+        }
+    }
+
+    private List<MapPointConfig.Marker> getDisplayableMapMarkers(
+            MapPointConfig config,
+            boolean logMissingRobotPoints
+    ) {
+        List<MapPointConfig.Marker> displayMarkers = new ArrayList<>();
+        List<DestModel.DataBean> robotPoints = getDisplayPointData();
+        if (config == null || robotPoints.isEmpty()) {
+            return displayMarkers;
+        }
+
+        for (MapPointConfig.Marker marker : config.getMarkers()) {
+            if (!MapPointConfigSanitizer.isUsableMarker(marker)) {
+                continue;
+            }
+            DestModel.DataBean robotPoint = findPointById(robotPoints, marker.getRobotPointId());
+            if (robotPoint == null) {
+                if (logMissingRobotPoints
+                        && loggedMissingMapPointIds.add(marker.getRobotPointId())) {
+                    Log.w(TAG, "忽略机器人列表中已不存在的地图标注: pointId="
+                            + marker.getRobotPointId());
+                }
+                continue;
+            }
+            MapPointConfig.Marker displayMarker = marker.copy();
+            displayMarker.setDisplayName(getMapMarkerDisplayName(marker, robotPoint));
+            displayMarkers.add(displayMarker);
+        }
+        return displayMarkers;
+    }
+
+    private List<MapPointConfig.Marker> getEditableMapMarkers() {
+        List<MapPointConfig.Marker> editableMarkers = new ArrayList<>();
+        if (editingMapPointConfig == null) {
+            return editableMarkers;
+        }
+        List<DestModel.DataBean> robotPoints = getDisplayPointData();
+        for (MapPointConfig.Marker marker : editingMapPointConfig.getMarkers()) {
+            if (MapPointConfigSanitizer.isUsableMarker(marker)
+                    && findPointById(robotPoints, marker.getRobotPointId()) != null) {
+                editableMarkers.add(marker);
+            }
+        }
+        return editableMarkers;
+    }
+
+    private String getMapMarkerDisplayName(
+            MapPointConfig.Marker marker,
+            DestModel.DataBean robotPoint
+    ) {
+        if (!TextUtils.isEmpty(marker.getDisplayName())) {
+            return marker.getDisplayName().trim();
+        }
+        return robotPoint == null
+                ? String.valueOf(marker.getRobotPointId())
+                : getPointDisplayName(robotPoint);
+    }
+
+    private boolean containsMapMarker(
+            List<MapPointConfig.Marker> markers,
+            int robotPointId
+    ) {
+        for (MapPointConfig.Marker marker : markers) {
+            if (MapPointConfigSanitizer.isUsableMarker(marker)
+                    && marker.getRobotPointId() == robotPointId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void focusMapPoint(DestModel.DataBean point) {
+        List<MapPointConfig.Marker> displayMarkers = getDisplayableMapMarkers(
+                savedMapPointConfig,
+                false
+        );
+        if (!containsMapMarker(displayMarkers, point.getId())) {
+            focusedMapRobotPointId = null;
+            mBinding.mapPointOverlay.setFocusedRobotPointId(null);
+            tip("该点位尚未配置地图位置");
+            return;
+        }
+        focusedMapRobotPointId = point.getId();
+        mBinding.mapPointOverlay.setFocusedRobotPointId(focusedMapRobotPointId);
+    }
+
+    private void requestMapEditEntry() {
+        if (mapEditMode || mapEditPasswordDialogShowing) {
+            return;
+        }
+        if (isRobotTaskBusyForMapEditing()) {
+            tip("机器人任务进行中，禁止编辑地图");
+            return;
+        }
+        showMapEditPasswordDialog();
+    }
+
+    private void showMapEditPasswordDialog() {
+        EditText passwordInput = new EditText(this);
+        passwordInput.setSingleLine(true);
+        passwordInput.setHint("请输入密码");
+        passwordInput.setInputType(
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
+        int padding = dp(24);
+        passwordInput.setPadding(padding, padding / 2, padding, padding / 2);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("地图编辑验证")
+                .setView(passwordInput)
+                .setPositiveButton("进入", null)
+                .setNegativeButton("取消", null)
+                .create();
+        dialog.setOnShowListener(dialogInterface -> {
+            mapEditPasswordDialogShowing = true;
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                if (!getIdleLockPassword().equals(passwordInput.getText().toString())) {
+                    passwordInput.setError("密码错误");
+                    passwordInput.selectAll();
+                    return;
+                }
+                if (isRobotTaskBusyForMapEditing()) {
+                    dialog.dismiss();
+                    tip("机器人任务进行中，禁止编辑地图");
+                    return;
+                }
+                dialog.dismiss();
+                enterMapEditMode();
+            });
+        });
+        dialog.setOnDismissListener(dialogInterface -> mapEditPasswordDialogShowing = false);
+        dialog.show();
+    }
+
+    private void enterMapEditMode() {
+        if (isRobotTaskBusyForMapEditing()) {
+            tip("机器人任务进行中，禁止编辑地图");
+            return;
+        }
+        editingMapPointConfig = savedMapPointConfig.copy();
+        mapEditMode = true;
+        mBinding.llMapEditToolbar.setVisibility(View.VISIBLE);
+        mBinding.llMapEditToolbar.bringToFront();
+        mBinding.mapPointOverlay.setEditMode(true);
+        refreshMapEditorControls(null);
+        tip("已进入地图编辑模式");
+    }
+
+    private void refreshMapEditorControls(MapPointConfig.Marker preferredMarker) {
+        if (!mapEditMode || editingMapPointConfig == null) {
+            return;
+        }
+
+        List<MapPointConfig.Marker> editableMarkers = getEditableMapMarkers();
+        MapPointConfig.Marker selectedMarker = preferredMarker;
+        if (selectedMarker != null && !editableMarkers.contains(selectedMarker)) {
+            selectedMarker = null;
+        }
+        if (selectedMarker == null && !editableMarkers.isEmpty()) {
+            selectedMarker = editableMarkers.get(0);
+        }
+
+        mapEditorUpdatingControls = true;
+        try {
+            mapMarkerChoices.clear();
+            mapMarkerChoices.add(new MapMarkerChoice(null, "标注：新建标注"));
+            for (MapPointConfig.Marker marker : editableMarkers) {
+                DestModel.DataBean robotPoint = findPointById(
+                        getDisplayPointData(),
+                        marker.getRobotPointId()
+                );
+                String markerName = robotPoint == null
+                        ? String.valueOf(marker.getRobotPointId())
+                        : getMapMarkerDisplayName(marker, robotPoint);
+                mapMarkerChoices.add(new MapMarkerChoice(marker, "标注：" + markerName));
+            }
+            mapMarkerChoiceAdapter.notifyDataSetChanged();
+
+            rebuildMapRobotPointChoices(selectedMarker != null);
+
+            currentEditingMapMarker = selectedMarker;
+            int markerChoicePosition = selectedMarker == null
+                    ? 0
+                    : findMapMarkerChoicePosition(selectedMarker);
+            mBinding.spinnerMapMarker.setSelection(Math.max(0, markerChoicePosition), false);
+            updateMapEditorFields(selectedMarker);
+        } finally {
+            mapEditorUpdatingControls = false;
+        }
+        refreshMapPointOverlay();
+    }
+
+    private int findMapMarkerChoicePosition(MapPointConfig.Marker marker) {
+        for (int choiceIndex = 0; choiceIndex < mapMarkerChoices.size(); choiceIndex++) {
+            if (mapMarkerChoices.get(choiceIndex).marker == marker) {
+                return choiceIndex;
+            }
+        }
+        return 0;
+    }
+
+    private void rebuildMapRobotPointChoices(boolean includeMappedRobotPoints) {
+        mapRobotPointChoices.clear();
+        Set<Integer> robotPointIds = new HashSet<>();
+        for (DestModel.DataBean robotPoint : getDisplayPointData()) {
+            boolean robotPointAvailableForSelection = robotPoint != null
+                    && robotPointIds.add(robotPoint.getId())
+                    && (includeMappedRobotPoints
+                    || findMapMarkerByRobotPointId(robotPoint.getId()) == null);
+            if (robotPointAvailableForSelection) {
+                mapRobotPointChoices.add(new RobotPointChoice(
+                        robotPoint,
+                        "点位：" + getPointDisplayName(robotPoint) + " (" + robotPoint.getId() + ")"
+                ));
+            }
+        }
+        mapRobotPointChoiceAdapter.notifyDataSetChanged();
+    }
+
+    private void refreshCurrentMapMarkerChoiceLabel() {
+        if (currentEditingMapMarker == null || mapMarkerChoiceAdapter == null) {
+            return;
+        }
+        DestModel.DataBean robotPoint = findPointById(
+                getDisplayPointData(),
+                currentEditingMapMarker.getRobotPointId()
+        );
+        String markerLabel = "标注："
+                + getMapMarkerDisplayName(currentEditingMapMarker, robotPoint);
+        for (MapMarkerChoice markerChoice : mapMarkerChoices) {
+            if (markerChoice.marker != currentEditingMapMarker) {
+                continue;
+            }
+            markerChoice.setLabel(markerLabel);
+            mapMarkerChoiceAdapter.notifyDataSetChanged();
+            View selectedView = mBinding.spinnerMapMarker.getSelectedView();
+            if (mBinding.spinnerMapMarker.getSelectedItem() == markerChoice
+                    && selectedView instanceof TextView) {
+                ((TextView) selectedView).setText(markerLabel);
+            }
+            return;
+        }
+    }
+
+    private void updateMapEditorFields(MapPointConfig.Marker marker) {
+        RobotPointChoice selectedRobotPointChoice = marker == null
+                ? findFirstUnmappedRobotPointChoice()
+                : findRobotPointChoice(marker.getRobotPointId());
+        int robotPointChoicePosition = mapRobotPointChoices.indexOf(selectedRobotPointChoice);
+        if (robotPointChoicePosition >= 0) {
+            mBinding.spinnerMapRobotPoint.setSelection(robotPointChoicePosition, false);
+        } else {
+            mBinding.spinnerMapRobotPoint.setSelection(AdapterView.INVALID_POSITION, false);
+        }
+
+        DestModel.DataBean selectedRobotPoint = selectedRobotPointChoice == null
+                ? null
+                : selectedRobotPointChoice.point;
+        String displayName = marker == null
+                ? (selectedRobotPoint == null ? "" : getPointDisplayName(selectedRobotPoint))
+                : getMapMarkerDisplayName(marker, selectedRobotPoint);
+        mBinding.etMapMarkerName.setText(displayName);
+        mBinding.etMapMarkerName.setSelection(displayName.length());
+        mBinding.spinnerMapRobotPoint.setEnabled(selectedRobotPoint != null);
+        mBinding.etMapMarkerName.setEnabled(selectedRobotPoint != null);
+        mBinding.btMapMarkerDelete.setEnabled(marker != null);
+        if (marker == null && selectedRobotPoint == null) {
+            mBinding.tvMapEditStatus.setText(
+                    getDisplayPointData().isEmpty() ? "暂无机器人点位" : "所有点位均已配置"
+            );
+        } else {
+            mBinding.tvMapEditStatus.setText("地图编辑中");
+        }
+        mBinding.mapPointOverlay.setEditingRobotPointId(
+                selectedRobotPoint == null ? null : selectedRobotPoint.getId()
+        );
+    }
+
+    private RobotPointChoice findFirstUnmappedRobotPointChoice() {
+        for (RobotPointChoice robotPointChoice : mapRobotPointChoices) {
+            if (findMapMarkerByRobotPointId(robotPointChoice.point.getId()) == null) {
+                return robotPointChoice;
+            }
+        }
+        return null;
+    }
+
+    private RobotPointChoice findRobotPointChoice(int robotPointId) {
+        for (RobotPointChoice robotPointChoice : mapRobotPointChoices) {
+            if (robotPointChoice.point.getId() == robotPointId) {
+                return robotPointChoice;
+            }
+        }
+        return null;
+    }
+
+    private void selectMapEditorMarker(MapPointConfig.Marker marker) {
+        if (!mapEditMode || editingMapPointConfig == null) {
+            return;
+        }
+        mapEditorUpdatingControls = true;
+        try {
+            currentEditingMapMarker = marker;
+            rebuildMapRobotPointChoices(marker != null);
+            updateMapEditorFields(marker);
+        } finally {
+            mapEditorUpdatingControls = false;
+        }
+        refreshMapPointOverlay();
+    }
+
+    private void selectMapEditorRobotPoint(DestModel.DataBean robotPoint) {
+        if (!mapEditMode || editingMapPointConfig == null || robotPoint == null) {
+            return;
+        }
+        if (currentEditingMapMarker != null) {
+            MapPointConfig.Marker occupiedMarker = findMapMarkerByRobotPointId(robotPoint.getId());
+            if (occupiedMarker != null && occupiedMarker != currentEditingMapMarker) {
+                tip("该机器人点位已有地图标注");
+                refreshMapEditorControls(currentEditingMapMarker);
+                return;
+            }
+            currentEditingMapMarker.setRobotPointId(robotPoint.getId());
+            if (TextUtils.isEmpty(currentEditingMapMarker.getDisplayName())) {
+                currentEditingMapMarker.setDisplayName(getPointDisplayName(robotPoint));
+            }
+            refreshMapEditorControls(currentEditingMapMarker);
+            return;
+        }
+
+        MapPointConfig.Marker occupiedMarker = findMapMarkerByRobotPointId(robotPoint.getId());
+        if (occupiedMarker != null) {
+            tip("该机器人点位已有地图标注");
+            refreshMapEditorControls(occupiedMarker);
+            return;
+        }
+
+        mapEditorUpdatingControls = true;
+        try {
+            String defaultDisplayName = getPointDisplayName(robotPoint);
+            mBinding.etMapMarkerName.setText(defaultDisplayName);
+            mBinding.etMapMarkerName.setSelection(defaultDisplayName.length());
+            mBinding.mapPointOverlay.setEditingRobotPointId(robotPoint.getId());
+        } finally {
+            mapEditorUpdatingControls = false;
+        }
+    }
+
+    private void selectMapMarkerFromOverlay(int robotPointId) {
+        if (!mapEditMode) {
+            return;
+        }
+        MapPointConfig.Marker selectedMarker = findMapMarkerByRobotPointId(robotPointId);
+        if (selectedMarker == null) {
+            return;
+        }
+        int choicePosition = findMapMarkerChoicePosition(selectedMarker);
+        if (choicePosition >= 0) {
+            mBinding.spinnerMapMarker.setSelection(choicePosition);
+        }
+    }
+
+    private void updateEditingMapMarkerPosition(
+            int robotPointId,
+            float normalizedX,
+            float normalizedY
+    ) {
+        if (!mapEditMode || editingMapPointConfig == null) {
+            return;
+        }
+        MapPointConfig.Marker marker = findMapMarkerByRobotPointId(robotPointId);
+        if (marker != null) {
+            marker.setNormalizedX(normalizedX);
+            marker.setNormalizedY(normalizedY);
+            currentEditingMapMarker = marker;
+            return;
+        }
+
+        DestModel.DataBean robotPoint = findPointById(getDisplayPointData(), robotPointId);
+        if (robotPoint == null) {
+            tip("机器人点位已不存在，无法新增标注");
+            return;
+        }
+        String displayName = mBinding.etMapMarkerName.getText().toString().trim();
+        if (TextUtils.isEmpty(displayName)) {
+            displayName = getPointDisplayName(robotPoint);
+        }
+        MapPointConfig.Marker newMarker = new MapPointConfig.Marker(
+                robotPointId,
+                displayName,
+                normalizedX,
+                normalizedY,
+                true
+        );
+        editingMapPointConfig.getMarkers().add(newMarker);
+        currentEditingMapMarker = newMarker;
+        refreshMapEditorControls(newMarker);
+    }
+
+    private MapPointConfig.Marker findMapMarkerByRobotPointId(int robotPointId) {
+        if (editingMapPointConfig == null) {
+            return null;
+        }
+        for (MapPointConfig.Marker marker : editingMapPointConfig.getMarkers()) {
+            if (MapPointConfigSanitizer.isUsableMarker(marker)
+                    && marker.getRobotPointId() == robotPointId) {
+                return marker;
+            }
+        }
+        return null;
+    }
+
+    private void deleteCurrentMapMarker() {
+        if (!mapEditMode || editingMapPointConfig == null || currentEditingMapMarker == null) {
+            return;
+        }
+        editingMapPointConfig.getMarkers().remove(currentEditingMapMarker);
+        currentEditingMapMarker = null;
+        refreshMapEditorControls(null);
+    }
+
+    private void saveMapEditing() {
+        if (!mapEditMode || editingMapPointConfig == null) {
+            return;
+        }
+        if (getDisplayPointData().isEmpty()) {
+            tip("暂无机器人点位，无法保存地图配置");
+            return;
+        }
+        MapPointConfig validatedConfig = buildPersistableMapPointConfig();
+        if (validatedConfig == null) {
+            return;
+        }
+        try {
+            boolean configSaved = MmkvUtils.saveString(
+                    KEY_MAP_POINT_CONFIG,
+                    mapConfigGson.toJson(validatedConfig)
+            );
+            if (!configSaved) {
+                Log.e(TAG, "MMKV 返回 false，地图点位配置未保存");
+                tip("地图点位配置保存失败");
+                return;
+            }
+            savedMapPointConfig = validatedConfig.copy();
+            exitMapEditMode();
+            tip("地图点位配置已保存");
+        } catch (RuntimeException exception) {
+            Log.e(TAG, "保存地图点位配置失败", exception);
+            tip("地图点位配置保存失败");
+        }
+    }
+
+    private MapPointConfig buildPersistableMapPointConfig() {
+        MapPointConfig persistedConfig = new MapPointConfig(ROOM_MAP_VERSION);
+        Set<Integer> persistedRobotPointIds = new HashSet<>();
+        for (MapPointConfig.Marker marker : editingMapPointConfig.getMarkers()) {
+            if (marker == null || !marker.isEnabled()) {
+                continue;
+            }
+            if (!hasValidNormalizedCoordinates(marker)) {
+                Log.w(TAG, "保存时忽略坐标无效的地图标注: pointId=" + marker.getRobotPointId());
+                continue;
+            }
+            DestModel.DataBean robotPoint = findPointById(
+                    getDisplayPointData(),
+                    marker.getRobotPointId()
+            );
+            if (robotPoint == null) {
+                Log.w(TAG, "保存时忽略已不存在的机器人点位: pointId=" + marker.getRobotPointId());
+                continue;
+            }
+            if (!persistedRobotPointIds.add(marker.getRobotPointId())) {
+                tip("同一个机器人点位只能保存一个地图标注");
+                return null;
+            }
+            MapPointConfig.Marker persistedMarker = marker.copy();
+            persistedMarker.setDisplayName(getMapMarkerDisplayName(marker, robotPoint));
+            persistedConfig.getMarkers().add(persistedMarker);
+        }
+        return persistedConfig;
+    }
+
+    private void cancelMapEditing() {
+        if (!mapEditMode) {
+            return;
+        }
+        exitMapEditMode();
+        tip("已取消地图编辑");
+    }
+
+    private void exitMapEditMode() {
+        mapEditMode = false;
+        editingMapPointConfig = null;
+        currentEditingMapMarker = null;
+        mBinding.llMapEditToolbar.setVisibility(View.GONE);
+        mBinding.mapPointOverlay.setEditMode(false);
+        mBinding.mapPointOverlay.setEditingRobotPointId(null);
+        refreshMapPointOverlay();
+    }
+
+    private boolean isRobotTaskBusyForMapEditing() {
+        return screenCompartmentRouteActive
+                || navigationTaskActive
+                || warehouseTaskPending
+                || upstreamChargeTaskActive;
+    }
+
+    private boolean blockRobotTaskActionWhileMapEditing() {
+        if (!mapEditMode) {
+            return false;
+        }
+        tip("地图编辑中，请先保存或取消");
+        return true;
+    }
+
+    private void discardMapEditingForPreemptingTask(String taskName) {
+        if (!mapEditMode) {
+            return;
+        }
+        exitMapEditMode();
+        Log.i(TAG, taskName + "抢占，已丢弃未保存的地图编辑工作副本");
+        tip(taskName + "已接管，未保存的地图编辑已丢弃");
+    }
+
+    private static final class MapMarkerChoice {
+        private final MapPointConfig.Marker marker;
+        private String label;
+
+        private MapMarkerChoice(MapPointConfig.Marker marker, String label) {
+            this.marker = marker;
+            this.label = label;
+        }
+
+        private void setLabel(String label) {
+            this.label = label;
+        }
+
+        @NonNull
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    private static final class RobotPointChoice {
+        private final DestModel.DataBean point;
+        private final String label;
+
+        private RobotPointChoice(DestModel.DataBean point, String label) {
+            this.point = point;
+            this.label = label;
+        }
+
+        @NonNull
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
     private boolean initSDK(String ip) {
         try {
             PeanutConfig.getConfig()
@@ -1661,8 +2471,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
     @Override
     protected void onDestroy() {
-        activityDestroyed = true;
         cancelScreenCompartmentRoute("Activity 销毁");
+        activityDestroyed = true;
         handler.removeCallbacks(idleLockRunnable);
         handler.removeCallbacks(pointRefreshRetryRunnable);
         handler.removeCallbacks(startupGoChargeRunnable);
@@ -1677,6 +2487,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (pickupServerToStop != null) {
             pickupServerToStop.stop();
         }
+        releaseWarehouseTaskResources();
         arrivalHttpClient.dispatcher().executorService().shutdown();
         arrivalHttpClient.connectionPool().evictAll();
         PeanutSDK.getInstance().release();
@@ -1770,6 +2581,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         } else if (id == mBinding.tvCompartment3.getId()) {
             handleCompartmentClick(2);
         } else if (id==mBinding.tvNavigate.getId()){
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
             if (selectedPointList.isEmpty()){
                 tip("请先绑定点位到仓位");
                 return;
@@ -1797,20 +2611,32 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }else if (id==mBinding.tvSecondaryScreenDisplay.getId()){
             //   startHardwareTests(null);
         }else if (id==mBinding.tvRefreshPoints.getId()){
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
             if (screenCompartmentRouteActive) {
                 tip("配送进行中，暂不支持刷新点位");
                 return;
             }
             refreshPointData(true);
         }else if (id==mBinding.tvGoCharge.getId()){
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
             cancelScreenCompartmentRoute("手动回充");
             mBinding.tvNavigate.setEnabled(true);
             sendGoChargeTask();
         }else if (id==mBinding.tvPatrolWarehouse.getId()){
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
             cancelScreenCompartmentRoute("手动巡仓");
             mBinding.tvNavigate.setEnabled(true);
             sendPatrolWarehouseTask();
         }else if (id==mBinding.tvRecall.getId()){
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
             cancelScreenCompartmentRoute("手动召回");
             mBinding.tvNavigate.setEnabled(true);
             sendRecallTask();
@@ -1844,6 +2670,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void sendStartupGoChargeTask() {
         if (startupGoChargeSent) {
+            return;
+        }
+        if (mapEditMode) {
+            Log.d(TAG, "delay startup go charge: map editing active");
+            scheduleStartupGoChargeTask();
             return;
         }
         if (warehouseTaskPending) {
@@ -1889,6 +2720,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void sendWarehouseTask(String taskName, String payload, String successMessage) {
+        if (blockRobotTaskActionWhileMapEditing()) {
+            return;
+        }
         if (warehouseTaskPending) {
             tip(pendingWarehouseTaskName + "请求发送中，请稍候");
             return;
@@ -1904,6 +2738,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             @Override
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
                 pendingWarehouseTaskWebSocket = webSocket;
+                if (activityDestroyed) {
+                    pendingWarehouseTaskWebSocket = null;
+                    webSocket.close(1001, "activity destroyed");
+                    webSocket.cancel();
+                    return;
+                }
                 boolean sent = webSocket.send(payload);
                 Log.d(TAG, taskName + "指令" + (sent ? "发送成功" : "发送失败") + ": " + payload);
                 if (sent) {
@@ -1917,6 +2757,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             @Override
             public void onMessage(@NonNull WebSocket webSocket, String text) {
                 Log.d(TAG, taskName + "指令收到响应: " + text);
+                if (activityDestroyed) {
+                    webSocket.close(1001, "activity destroyed");
+                    return;
+                }
                 handleWarehouseTaskResponse(taskName, text, successMessage);
                 webSocket.close(1000, taskName + " response received");
             }
@@ -1925,6 +2769,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 String text = bytes.utf8();
                 Log.d(TAG, taskName + "指令收到二进制响应: " + text);
+                if (activityDestroyed) {
+                    webSocket.close(1001, "activity destroyed");
+                    return;
+                }
                 handleWarehouseTaskResponse(taskName, text, successMessage);
                 webSocket.close(1000, taskName + " response received");
             }
@@ -1932,6 +2780,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, Response response) {
                 Log.e(TAG, taskName + "指令连接失败: " + t.getMessage(), t);
+                if (activityDestroyed) {
+                    return;
+                }
                 handleWarehouseTaskFailure(taskName, "连接失败：" + t.getMessage());
             }
 
@@ -1996,6 +2847,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                if (activityDestroyed) {
+                    return;
+                }
                 finishWarehouseTaskUi(taskName);
                 mBinding.tvWarehouseTaskStatus.setText(message);
                 mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.blue));
@@ -2014,6 +2868,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                if (activityDestroyed) {
+                    return;
+                }
                 finishWarehouseTaskUi(taskName);
                 String displayMessage = taskName + "失败：" + message;
                 mBinding.tvWarehouseTaskStatus.setText(displayMessage);
@@ -2054,6 +2911,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                if (activityDestroyed) {
+                    return;
+                }
                 handler.removeCallbacks(warehouseTaskStatusClearRunnable);
                 mBinding.tvWarehouseTaskStatus.setText(message);
                 mBinding.tvWarehouseTaskStatus.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.grey_700));
@@ -2071,6 +2931,20 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             pendingWarehouseTaskWebSocket.close(1000, "warehouse task finished");
             pendingWarehouseTaskWebSocket = null;
         }
+    }
+
+    private void releaseWarehouseTaskResources() {
+        WebSocket warehouseTaskWebSocket = pendingWarehouseTaskWebSocket;
+        pendingWarehouseTaskWebSocket = null;
+        warehouseTaskPending = false;
+        pendingWarehouseTaskName = "";
+        if (warehouseTaskWebSocket != null) {
+            warehouseTaskWebSocket.close(1001, "activity destroyed");
+            warehouseTaskWebSocket.cancel();
+        }
+        warehouseTaskWebSocketClient.dispatcher().cancelAll();
+        warehouseTaskWebSocketClient.dispatcher().executorService().shutdown();
+        warehouseTaskWebSocketClient.connectionPool().evictAll();
     }
 
     /**
@@ -2580,13 +3454,26 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    if (!TextUtils.isEmpty(flag)){
+                    if (activityDestroyed) {
+                        return;
+                    }
+                    String completedTaskFlag = flag;
+                    if (!TextUtils.isEmpty(completedTaskFlag)){
+                        String completionMessage = completedTaskFlag + "已完成";
+                        if (webSocketService == null) {
+                            Log.w(TAG, "skip navigation completion report: websocket unavailable");
+                        } else {
+                            try {
+                                webSocketService.send(completionMessage);
+                            } catch (RuntimeException exception) {
+                                Log.e(TAG, "navigation completion report failed", exception);
+                            }
+                        }
 
-                        webSocketService.send(flag+"已完成");
-
-                        Log.d("websocket=======", "flag =============" + flag);
+                        Log.d("websocket=======", "flag =============" + completedTaskFlag);
                         flag="";
                     }
+                    invalidateNavigationTask("upstream route completed");
                     //   ttsUntil.speech("已经没有下一个目的地了",false);
                     mBinding.tvNavigate.setEnabled(true);
                 }
@@ -2808,12 +3695,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 webSocketService.send("开始充电");
             }else if(status==1||status==6){
                 isCharging=false;
+                upstreamChargeTaskActive = false;
             }
             Log.d("Charger===", "status = " + status);
         }
 
         @Override
         public void onError(int errorCode) {
+            upstreamChargeTaskActive = false;
             Log.d("Charger===", "errorCode = " + errorCode);
         }
     };

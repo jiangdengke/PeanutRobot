@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查实现是否复用现有密码和本地存储，没有引入重复配置机制。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"验证点位 ID、比例坐标、图片裁切矩阵、持久化和点击联动的往返一致性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查改动可读性、范围控制、异常配置保护和验证证据。"}
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"验证地图浏览和编辑不会改变配送只读、路线顺序、到位等待或导航会话。"}
