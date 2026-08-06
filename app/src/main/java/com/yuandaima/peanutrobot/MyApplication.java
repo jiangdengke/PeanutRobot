@@ -6,6 +6,7 @@ import android.view.Gravity;
 import com.blankj.utilcode.util.ToastUtils;
 import com.blankj.utilcode.util.Utils;
 import com.tencent.mmkv.MMKV;
+import com.yuandaima.peanutrobot.util.DiagnosticLogRecorder;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
 
 import cat.ereza.customactivityoncrash.CustomActivityOnCrash;
@@ -17,6 +18,7 @@ public class MyApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        DiagnosticLogRecorder.initialize(this);
         //初始化mmkv
         MMKV.initialize(this);
         MmkvUtils.getInstance();

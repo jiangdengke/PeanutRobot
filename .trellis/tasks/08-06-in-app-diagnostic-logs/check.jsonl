@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查实现是否复用现有 UI 和日志模式，没有引入重复控制状态。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"验证事件写入、轮转文件、读取快照、清空和复制的数据一致性及异常传播边界。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查格式、线程安全、容量轮转、队列背压、清空顺序、备份排除和针对性测试证据。"}
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"核对诊断接入只观察关键路径，不改变导航、到位等待、抢占和上游协议。"}

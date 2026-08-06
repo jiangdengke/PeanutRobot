@@ -3,6 +3,8 @@ package com.yuandaima.peanutrobot;
 import static com.keenon.sdk.external.PeanutSDK.SDK_INIT_SUCCESS;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -10,6 +12,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.hardware.display.DisplayManager;
 import android.media.MediaPlayer;
@@ -42,6 +45,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -89,6 +93,7 @@ import com.yuandaima.peanutrobot.presentation.PresentationCoucou;
 import com.yuandaima.peanutrobot.server.PickupStatusServer;
 import com.yuandaima.peanutrobot.server.WebServer;
 import com.yuandaima.peanutrobot.server.WebSocketService;
+import com.yuandaima.peanutrobot.util.DiagnosticLogRecorder;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
@@ -334,6 +339,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onCreate");
         setTitle("");
         if (getSupportActionBar() != null) {
             getSupportActionBar().hide();
@@ -363,6 +369,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onResume() {
         super.onResume();
+        DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onResume");
         handler.postDelayed(uploadRunnable, 10000);
         if (idleLocked) {
             enterIdleLockFullscreen();
@@ -374,6 +381,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onPause() {
         super.onPause();
+        DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onPause");
         handler.removeCallbacks(uploadRunnable);
         handler.removeCallbacks(idleLockRunnable);
     }
@@ -886,12 +894,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                         @Override
                         public void onMessage(String text,String url) {
                             Log.d("MyServer","url=="+url+",text=="+text);
+                            DiagnosticLogRecorder.info("HTTP", "收到上游请求 path=" + url);
                             switch (url){
                                 case "/robot_task/go_to_charge":
                                     Integer upstreamPileId =
                                             UpstreamChargeTaskParser.parsePositivePileId(text);
                                     if (upstreamPileId == null) {
                                         Log.w(TAG, "ignore invalid upstream go_to_charge task");
+                                        DiagnosticLogRecorder.warn(
+                                                "CHARGER",
+                                                "忽略无效上游回充任务 path=/robot_task/go_to_charge"
+                                        );
                                         break;
                                     }
                                     runOnUiThread(() -> {
@@ -901,14 +914,26 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         PeanutCharger availableCharger = mPeanutCharger;
                                         if (availableCharger == null) {
                                             Log.w(TAG, "ignore upstream go_to_charge: charger unavailable");
+                                            DiagnosticLogRecorder.warn(
+                                                    "CHARGER",
+                                                    "忽略上游回充任务：充电模块未就绪 pile=" + upstreamPileId
+                                            );
                                             tip("充电模块未就绪，已忽略上游回充任务");
                                             return;
                                         }
+                                        DiagnosticLogRecorder.info(
+                                                "CHARGER",
+                                                "执行上游回充任务 pile=" + upstreamPileId
+                                        );
                                         upstreamChargeTaskActive = true;
                                         discardMapEditingForPreemptingTask("HTTP 回充任务");
                                         cancelScreenCompartmentRoute("HTTP 回充任务");
                                         mBinding.tvNavigate.setEnabled(true);
                                         flag="go_to_charge";
+                                        DiagnosticLogRecorder.info(
+                                                "NAV",
+                                                "调用 NavManager.stop reason=HTTP 回充任务"
+                                        );
                                         NavManager.getInstance().stop();
                                         //   NavManager.getInstance().release();
                                         availableCharger.setPile(upstreamPileId);
@@ -925,6 +950,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         );
                                     } catch (RuntimeException exception) {
                                         Log.w(TAG, "ignore malformed upstream send_point route", exception);
+                                        DiagnosticLogRecorder.warn(
+                                                "HTTP",
+                                                "忽略格式错误的 send_point 路线"
+                                        );
                                         break;
                                     }
                                     boolean routeContainsNullNode = false;
@@ -940,6 +969,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                             || upstreamRouteNodes.isEmpty()
                                             || routeContainsNullNode) {
                                         Log.w(TAG, "ignore invalid upstream send_point route");
+                                        DiagnosticLogRecorder.warn(
+                                                "HTTP",
+                                                "忽略空或包含空节点的 send_point 路线"
+                                        );
                                         break;
                                     }
                                     runOnUiThread(() -> {
@@ -951,21 +984,34 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         cancelScreenCompartmentRoute("上游 send_point 抢占");
                                         if (mPeanutCharger!=null){
                                             Log.d("navigatenext","CHARGE_ACTION_STOP");
+                                            DiagnosticLogRecorder.info(
+                                                    "CHARGER",
+                                                    "上游 send_point 发送 CHARGE_ACTION_STOP"
+                                            );
                                             mPeanutCharger.performAction(PeanutCharger.CHARGE_ACTION_STOP);
                                         }
                                         flag="send_point";
                                         routeNodes = new ArrayList<>(upstreamRouteNodes);
+                                        DiagnosticLogRecorder.info(
+                                                "HTTP",
+                                                "接受上游 send_point " + describeRoute(routeNodes)
+                                        );
                                         Log.d("navigatenext","send_poin=="+new Gson().toJson(routeNodes));
                                         prepareNav(routeNodes);
                                     });
                                     break;
                                 case "/robot_task/send_stop":
                                     Log.d("MyServer","send_stop==");
+                                    DiagnosticLogRecorder.info("HTTP", "接受上游 send_stop");
                                     runOnUiThread(() -> {
                                         if (activityDestroyed) {
                                             return;
                                         }
                                         cancelScreenCompartmentRoute("上游停止任务");
+                                        DiagnosticLogRecorder.info(
+                                                "NAV",
+                                                "调用 NavManager.stop reason=上游停止任务"
+                                        );
                                         NavManager.getInstance().stop();
                                         mBinding.tvNavigate.setEnabled(true);
                                     });
@@ -1024,6 +1070,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     });
                 } catch (IOException e) {
                     Log.e("WebServer", "启动失败", e);
+                    DiagnosticLogRecorder.error(
+                            "HTTP",
+                            "9095 服务启动失败：" + e.getMessage()
+                    );
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -1056,8 +1106,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     return;
                 }
                 Log.i(TAG, "pickup status server started on port " + PICKUP_STATUS_SERVER_PORT);
+                DiagnosticLogRecorder.info(
+                        "PICKUP",
+                        "pickup_status 服务已启动 port=" + PICKUP_STATUS_SERVER_PORT
+                );
             } catch (IOException exception) {
                 Log.e(TAG, "pickup status server failed to start", exception);
+                DiagnosticLogRecorder.error(
+                        "PICKUP",
+                        "pickup_status 服务启动失败：" + exception.getMessage()
+                );
             }
         }, "pickup-status-server").start();
     }
@@ -1134,6 +1192,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
+        mBinding.tvDiagnosticLogs.setOnClickListener(this);
         mBinding.tvCompartment1.setOnClickListener(this);
         mBinding.tvCompartment2.setOnClickListener(this);
         mBinding.tvCompartment3.setOnClickListener(this);
@@ -1424,6 +1483,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             lastHandledScreenArrivalPosition = -1;
             screenCompartmentRouteActive = true;
         }
+        DiagnosticLogRecorder.info(
+                "DELIVERY",
+                "创建屏幕仓位任务 bindings=" + routeBaySnapshot
+                        + ", selectedPoints=" + selectedPointList.size()
+        );
         activeCompartmentIndex = -1;
         createDeliveryProgressSnapshot(routeBaySnapshot);
         showDeliveryProgressView();
@@ -2471,6 +2535,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
     @Override
     protected void onDestroy() {
+        DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onDestroy start");
         cancelScreenCompartmentRoute("Activity 销毁");
         activityDestroyed = true;
         handler.removeCallbacks(idleLockRunnable);
@@ -2491,12 +2556,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         arrivalHttpClient.dispatcher().executorService().shutdown();
         arrivalHttpClient.connectionPool().evictAll();
         PeanutSDK.getInstance().release();
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "调用 NavManager.stop/release reason=Activity 销毁"
+        );
         NavManager.getInstance().stop();
         NavManager.getInstance().release();
         PeanutRuntime.getInstance().removeListener(mRuntimeListener);
         if (mPeanutCharger != null) {
             mPeanutCharger.release();
         }
+        DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onDestroy complete");
         super.onDestroy();
     }
 
@@ -2514,11 +2584,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
     private PeanutSDK.ErrorListener mErrorListener = errorCode -> {
         Log.d(TAG, "onInit:" + errorCode);
+        DiagnosticLogRecorder.info("SDK", "PeanutSDK 初始化回调 code=" + errorCode);
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (errorCode == SDK_INIT_SUCCESS) {
                     Log.d("routeNodes","SDK_INIT_SUCCESS:"+errorCode);
+                    DiagnosticLogRecorder.info("SDK", "PeanutSDK 初始化成功");
                     initNavManager();
                     scheduleStartupGoChargeTask();
                     tip("SDK_INIT_SUCCESS");
@@ -2540,6 +2612,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     });
                 } else {
                     Log.d("routeNodes","SDK_INIT_FAIL:"+errorCode);
+                    DiagnosticLogRecorder.error(
+                            "SDK",
+                            "PeanutSDK 初始化失败 code=" + errorCode
+                    );
                     tip("SDK_INIT_FAIL:"+errorCode);
                 }
             }
@@ -2574,6 +2650,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             showPointSelectionView();
         } else if (id == mBinding.tvDeliveryProgressTab.getId()) {
             showDeliveryProgressView();
+        } else if (id == mBinding.tvDiagnosticLogs.getId()) {
+            showDiagnosticLogDialog();
         } else if (id == mBinding.tvCompartment1.getId()) {
             handleCompartmentClick(0);
         } else if (id == mBinding.tvCompartment2.getId()) {
@@ -2601,6 +2679,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
             flag="";
             mBinding.tvNavigate.setEnabled(false);
+            DiagnosticLogRecorder.info(
+                    "DELIVERY",
+                    "用户点击立即出发 " + describeRoute(routeNodes)
+            );
             Log.d("navigatenext","routeNodes===="+new Gson().toJson(routeNodes)+",size="+routeNodes.size());
 //            RouteNode node = new RouteNode();
 //            node.setId(Integer.parseInt(editText.getText().toString()));
@@ -2625,6 +2707,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
             cancelScreenCompartmentRoute("手动回充");
             mBinding.tvNavigate.setEnabled(true);
+            DiagnosticLogRecorder.info("WAREHOUSE", "用户点击回充");
             sendGoChargeTask();
         }else if (id==mBinding.tvPatrolWarehouse.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
@@ -2632,6 +2715,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
             cancelScreenCompartmentRoute("手动巡仓");
             mBinding.tvNavigate.setEnabled(true);
+            DiagnosticLogRecorder.info("WAREHOUSE", "用户点击巡仓");
             sendPatrolWarehouseTask();
         }else if (id==mBinding.tvRecall.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
@@ -2639,8 +2723,114 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
             cancelScreenCompartmentRoute("手动召回");
             mBinding.tvNavigate.setEnabled(true);
+            DiagnosticLogRecorder.info("WAREHOUSE", "用户点击召回");
             sendRecallTask();
         }
+    }
+
+    private void showDiagnosticLogDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(12), dp(8), dp(12), dp(8));
+
+        TextView logTextView = new TextView(this);
+        logTextView.setTextColor(ContextCompat.getColor(this, R.color.ui_text_primary));
+        logTextView.setTextSize(12);
+        logTextView.setTypeface(Typeface.MONOSPACE);
+        logTextView.setTextIsSelectable(true);
+        logTextView.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+        ScrollView logScrollView = new ScrollView(this);
+        logScrollView.setFillViewport(true);
+        logScrollView.addView(logTextView, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT
+        ));
+        content.addView(logScrollView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+        ));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        String[] actionLabels = {"刷新", "复制全部", "清空", "关闭"};
+        Button[] actionButtons = new Button[actionLabels.length];
+        for (int index = 0; index < actionLabels.length; index++) {
+            Button actionButton = new Button(this);
+            actionButton.setText(actionLabels[index]);
+            actionButton.setTextSize(13);
+            actionButton.setAllCaps(false);
+            actions.addView(actionButton, new LinearLayout.LayoutParams(0, dp(44), 1f));
+            actionButtons[index] = actionButton;
+        }
+        content.addView(actions, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+
+        AlertDialog logDialog = new AlertDialog.Builder(this)
+                .setTitle("运行日志")
+                .setView(content)
+                .create();
+
+        Runnable refreshLogs = () -> {
+            String snapshot = DiagnosticLogRecorder.snapshot();
+            logTextView.setText(TextUtils.isEmpty(snapshot) ? "暂无运行日志" : snapshot);
+            logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+        };
+        actionButtons[0].setOnClickListener(view -> refreshLogs.run());
+        actionButtons[1].setOnClickListener(view -> {
+            String snapshot = DiagnosticLogRecorder.snapshot();
+            if (TextUtils.isEmpty(snapshot)) {
+                tip("暂无可复制的运行日志");
+                return;
+            }
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(
+                    Context.CLIPBOARD_SERVICE
+            );
+            if (clipboard == null) {
+                tip("系统剪贴板不可用");
+                return;
+            }
+            try {
+                clipboard.setPrimaryClip(ClipData.newPlainText("运行日志", snapshot));
+                tip("运行日志已复制");
+            } catch (RuntimeException exception) {
+                Log.e(TAG, "copy diagnostic logs failed", exception);
+                tip("运行日志复制失败，请重试");
+            }
+        });
+        actionButtons[2].setOnClickListener(view -> new AlertDialog.Builder(this)
+                .setTitle("清空运行日志")
+                .setMessage("仅清除诊断记录，不会停止或改变当前机器人任务。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("清空", (dialog, which) -> {
+                    DiagnosticLogRecorder.clear(success -> runOnUiThread(() -> {
+                        refreshLogs.run();
+                        tip(success
+                                ? "运行日志已清空"
+                                : "内存日志已清空，本地文件清理失败");
+                    }));
+                    refreshLogs.run();
+                })
+                .show());
+        actionButtons[3].setOnClickListener(view -> logDialog.dismiss());
+
+        logDialog.setOnShowListener(dialog -> {
+            Window dialogWindow = logDialog.getWindow();
+            if (dialogWindow != null) {
+                int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                int screenHeight = getResources().getDisplayMetrics().heightPixels;
+                dialogWindow.setLayout(
+                        (int) (screenWidth * 0.92f),
+                        (int) (screenHeight * 0.82f)
+                );
+            }
+        });
+        refreshLogs.run();
+        logDialog.show();
     }
 
     private void sendGoChargeTask() {
@@ -2664,6 +2854,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (startupGoChargeSent) {
             return;
         }
+        DiagnosticLogRecorder.info(
+                "WAREHOUSE",
+                "计划启动自动回充 delayMs=" + STARTUP_GO_CHARGE_DELAY_MS
+        );
         handler.removeCallbacks(startupGoChargeRunnable);
         handler.postDelayed(startupGoChargeRunnable, STARTUP_GO_CHARGE_DELAY_MS);
     }
@@ -2684,6 +2878,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         startupGoChargeSent = true;
         Log.d(TAG, "send startup go charge task");
+        DiagnosticLogRecorder.info("WAREHOUSE", "发送启动自动回充任务");
         sendGoChargeTask(true);
     }
 
@@ -2730,6 +2925,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         beginWarehouseTaskLoading(taskName);
         Log.d(TAG, taskName + "指令发送到 " + WAREHOUSE_TASK_WS + ": " + payload);
+        DiagnosticLogRecorder.info(
+                "WAREHOUSE",
+                "发送任务 name=" + taskName + ", endpoint=" + WAREHOUSE_TASK_WS
+        );
         Request request = new Request.Builder()
                 .url(WAREHOUSE_TASK_WS)
                 .build();
@@ -2746,6 +2945,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 }
                 boolean sent = webSocket.send(payload);
                 Log.d(TAG, taskName + "指令" + (sent ? "发送成功" : "发送失败") + ": " + payload);
+                DiagnosticLogRecorder.info(
+                        "WAREHOUSE",
+                        "任务 WebSocket 写入 name=" + taskName + ", success=" + sent
+                );
                 if (sent) {
                     showWarehouseTaskStatus(taskName + "请求已发送，等待接口确认...");
                 } else {
@@ -2757,6 +2960,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             @Override
             public void onMessage(@NonNull WebSocket webSocket, String text) {
                 Log.d(TAG, taskName + "指令收到响应: " + text);
+                DiagnosticLogRecorder.info(
+                        "WAREHOUSE",
+                        "收到任务响应 name=" + taskName + ", binary=false"
+                );
                 if (activityDestroyed) {
                     webSocket.close(1001, "activity destroyed");
                     return;
@@ -2769,6 +2976,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 String text = bytes.utf8();
                 Log.d(TAG, taskName + "指令收到二进制响应: " + text);
+                DiagnosticLogRecorder.info(
+                        "WAREHOUSE",
+                        "收到任务响应 name=" + taskName + ", binary=true"
+                );
                 if (activityDestroyed) {
                     webSocket.close(1001, "activity destroyed");
                     return;
@@ -2780,6 +2991,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, Response response) {
                 Log.e(TAG, taskName + "指令连接失败: " + t.getMessage(), t);
+                DiagnosticLogRecorder.error(
+                        "WAREHOUSE",
+                        "任务连接失败 name=" + taskName + "：" + t.getMessage()
+                );
                 if (activityDestroyed) {
                     return;
                 }
@@ -2844,6 +3059,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (!warehouseTaskPending) {
             return;
         }
+        DiagnosticLogRecorder.info(
+                "WAREHOUSE",
+                "任务已受理 name=" + taskName + ", message=" + message
+        );
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -2864,6 +3083,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             return;
         }
         Log.e(TAG, taskName + "指令失败: " + message);
+        DiagnosticLogRecorder.error(
+                "WAREHOUSE",
+                "任务失败 name=" + taskName + ", message=" + message
+        );
         closePendingWarehouseTaskWebSocket();
         runOnUiThread(new Runnable() {
             @Override
@@ -2961,10 +3184,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         if (activityDestroyed || newRouteNodes == null || newRouteNodes.isEmpty()) {
             Log.w(TAG, "ignore invalid navigation route");
+            DiagnosticLogRecorder.warn("NAV", "忽略无效导航路线");
             return;
         }
 
         invalidateNavigationTask("prepare replacement");
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "调用 NavManager.stop reason=prepare replacement"
+        );
         NavManager.getInstance().stop();
 //        NavManager.getInstance().release();
         routeNodes = new ArrayList<>(newRouteNodes);
@@ -2977,6 +3205,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         navigationLegPosition = -1;
         expectedNavigationRoutePosition = 0;
 
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "创建导航任务 task=" + activeNavigationTaskGeneration
+                        + ", source=" + (screenCompartmentRouteActive ? "screen" : flag)
+                        + ", " + describeRoute(routeNodes)
+        );
         prepareNavigationRoute();
     }
 
@@ -2986,9 +3220,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         peanutNavigation = navManager.getmPeanutNavigation();
         peanutNavigation.setTargets(new ArrayList<>(routeNodes));
 
-        navManager.setSpeed(routeNodes.size()==1
+        int navigationSpeed = routeNodes.size()==1
                 ? MmkvUtils.decodeInt("single_point_speed", DEFAULT_NAVIGATION_SPEED)
-                : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED));
+                : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED);
+        navManager.setSpeed(navigationSpeed);
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "准备路线 task=" + activeNavigationTaskGeneration
+                        + ", session=" + activeNavigationSessionGeneration
+                        + ", speed=" + navigationSpeed
+        );
         scheduleNavigationPrepareTimeout(
                 activeNavigationTaskGeneration,
                 activeNavigationSessionGeneration
@@ -3017,12 +3258,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         navigationPrepareTimeoutRunnable = null;
         if (!isCurrentNavigationTask(taskGeneration)
                 || sessionGeneration != activeNavigationSessionGeneration) {
+            DiagnosticLogRecorder.debug(
+                    "NAV",
+                    "忽略旧路线准备超时 task=" + taskGeneration
+                            + ", session=" + sessionGeneration
+            );
             return;
         }
+        DiagnosticLogRecorder.error(
+                "NAV",
+                "路线准备超时 task=" + taskGeneration + ", session=" + sessionGeneration
+        );
         if (screenCompartmentRouteActive) {
             cancelScreenCompartmentRoute("导航路线准备超时");
         } else {
             invalidateNavigationTask("navigation prepare timeout");
+            DiagnosticLogRecorder.info(
+                    "NAV",
+                    "调用 NavManager.stop reason=navigation prepare timeout"
+            );
             NavManager.getInstance().stop();
         }
         mBinding.tvNavigate.setEnabled(true);
@@ -3050,8 +3304,33 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         navigationLegArmed = false;
         navigationLegPosition = -1;
         expectedNavigationRoutePosition = nextPosition;
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "前往下一点 task=" + taskGeneration + ", position=" + nextPosition
+        );
         NavManager.getInstance().nextDes();
         NavManager.getInstance().readyGo(true);
+    }
+
+    private String describeRoute(List<RouteNode> nodes) {
+        if (nodes == null) {
+            return "route=null";
+        }
+        StringBuilder description = new StringBuilder("routeSize=").append(nodes.size());
+        int displayedNodes = Math.min(nodes.size(), 10);
+        for (int index = 0; index < displayedNodes; index++) {
+            RouteNode node = nodes.get(index);
+            description.append(", [").append(index).append("]=");
+            if (node == null) {
+                description.append("null");
+            } else {
+                description.append(node.getId()).append(':').append(node.getName());
+            }
+        }
+        if (nodes.size() > displayedNodes) {
+            description.append(", ...");
+        }
+        return description.toString();
     }
 
     public  List<DestModel.DataBean> getRouteNodesList(){
@@ -3067,6 +3346,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onSessionStateChanged(int sessionGeneration, int state, int schedule) {
         int observedTaskGeneration = navigationTaskGeneration;
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "SDK 状态 state=" + state
+                        + ", schedule=" + schedule
+                        + ", observedTask=" + observedTaskGeneration
+                        + ", session=" + sessionGeneration
+        );
         if (Looper.myLooper() == Looper.getMainLooper()) {
             handleNavigationStateChanged(state, observedTaskGeneration, sessionGeneration);
         } else {
@@ -3090,6 +3376,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Log.d(TAG, "ignore stale navigation state: state=" + state
                     + ", generation=" + observedTaskGeneration
                     + ", session=" + observedSessionGeneration);
+            DiagnosticLogRecorder.warn(
+                    "NAV",
+                    "忽略旧导航状态 state=" + state
+                            + ", task=" + observedTaskGeneration
+                            + ", activeTask=" + activeNavigationTaskGeneration
+                            + ", session=" + observedSessionGeneration
+                            + ", activeSession=" + activeNavigationSessionGeneration
+            );
             return;
         }
 
@@ -3098,12 +3392,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             if (!isValidRoutePosition(currentPosition)
                     || currentPosition != expectedNavigationRoutePosition
                     || isArrivalWaitActive()) {
+                DiagnosticLogRecorder.warn(
+                        "NAV",
+                        "拒绝 STATE_RUNNING position=" + currentPosition
+                                + ", expected=" + expectedNavigationRoutePosition
+                                + ", waiting=" + isArrivalWaitActive()
+                );
                 return;
             }
             navigationLegPosition = currentPosition;
             navigationLegArmed = true;
             Log.d(TAG, "navigation leg armed: generation=" + observedTaskGeneration
                     + ", position=" + currentPosition);
+            DiagnosticLogRecorder.info(
+                    "NAV",
+                    "接受 STATE_RUNNING task=" + observedTaskGeneration
+                            + ", position=" + currentPosition
+            );
             return;
         }
 
@@ -3118,10 +3423,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Log.d(TAG, "ignore unarmed destination: generation=" + observedTaskGeneration
                     + ", position=" + currentPosition
                     + ", armedPosition=" + navigationLegPosition);
+            DiagnosticLogRecorder.warn(
+                    "NAV",
+                    "拒绝 STATE_DESTINATION task=" + observedTaskGeneration
+                            + ", position=" + currentPosition
+                            + ", armed=" + navigationLegArmed
+                            + ", armedPosition=" + navigationLegPosition
+            );
             return;
         }
 
         navigationLegArmed = false;
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "接受 STATE_DESTINATION task=" + observedTaskGeneration
+                        + ", position=" + currentPosition
+        );
         arrived(observedTaskGeneration, currentPosition);
     }
 
@@ -3131,8 +3448,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 || !isValidRoutePosition(currentPosition)) {
             Log.w(TAG, "ignore invalid arrival: generation=" + taskGeneration
                     + ", position=" + currentPosition);
+            DiagnosticLogRecorder.warn(
+                    "NAV",
+                    "忽略无效到位 task=" + taskGeneration + ", position=" + currentPosition
+            );
             return;
         }
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "到位后发送 readyGo(false) task=" + taskGeneration
+                        + ", position=" + currentPosition
+                        + ", screenRoute=" + screenCompartmentRouteActive
+        );
         NavManager.getInstance().readyGo(false);
 //        Log.d("navigatenext","getQueueName="+(response.get(0).getQueueName()));
         Log.d("navigatenext","getCurrentPosition="+currentPosition+",size=="+routeNodes.size());
@@ -3167,6 +3494,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void invalidateNavigationTask(String reason) {
+        int invalidatedGeneration = activeNavigationTaskGeneration;
+        boolean taskWasActive = navigationTaskActive;
         navigationTaskGeneration++;
         activeNavigationTaskGeneration = navigationTaskGeneration;
         navigationTaskActive = false;
@@ -3178,6 +3507,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         clearNavigationPrepareTimeout();
         Log.d(TAG, "navigation task invalidated: " + reason
                 + ", generation=" + navigationTaskGeneration);
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "导航任务失效 reason=" + reason
+                        + ", wasActive=" + taskWasActive
+                        + ", invalidatedTask=" + invalidatedGeneration
+                        + ", nextGeneration=" + navigationTaskGeneration
+        );
     }
 
     private void mediaPlayerShow(String dataSource) {
@@ -3259,6 +3595,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         handler.postDelayed(timeoutRunnable, ARRIVAL_WAIT_TIMEOUT_MS);
         Log.i(TAG, "arrival wait started: point=" + currentNode.getName()
                 + ", bay=" + bay + ", generation=" + waitGeneration);
+        DiagnosticLogRecorder.info(
+                "ARRIVAL",
+                "开始等待取餐 point=" + currentNode.getName()
+                        + ", pointId=" + currentNode.getId()
+                        + ", bay=" + bay
+                        + ", wait=" + waitGeneration
+                        + ", task=" + taskGeneration
+                        + ", timeoutMs=" + ARRIVAL_WAIT_TIMEOUT_MS
+        );
     }
 
     private boolean handlePickupCompleted() {
@@ -3267,8 +3612,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             waitGeneration = arrivalWaitGeneration;
         }
         if (!claimArrivalWait(waitGeneration)) {
+            DiagnosticLogRecorder.warn(
+                    "PICKUP",
+                    "拒绝 pickup_status：当前无可消费等待 wait=" + waitGeneration
+            );
             return false;
         }
+        DiagnosticLogRecorder.info(
+                "PICKUP",
+                "接受 pickup_status wait=" + waitGeneration
+        );
         handler.post(() -> completeArrivalWait(waitGeneration, "收到取餐完成通知"));
         return true;
     }
@@ -3307,9 +3660,20 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (!isCurrentNavigationTask(taskGeneration)) {
             Log.d(TAG, "ignore stale arrival wait completion: waitGeneration=" + waitGeneration
                     + ", taskGeneration=" + taskGeneration);
+            DiagnosticLogRecorder.warn(
+                    "ARRIVAL",
+                    "忽略旧等待完成 wait=" + waitGeneration + ", task=" + taskGeneration
+            );
             return;
         }
         Log.i(TAG, reason + ", generation=" + waitGeneration);
+        DiagnosticLogRecorder.info(
+                "ARRIVAL",
+                "完成等待 reason=" + reason
+                        + ", wait=" + waitGeneration
+                        + ", task=" + taskGeneration
+                        + ", position=" + routePosition
+        );
         String completedStatus = reason.contains("超时")
                 ? DELIVERY_STATUS_TIMED_OUT
                 : DELIVERY_STATUS_PICKED_UP;
@@ -3360,12 +3724,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 previousArrivalReportCall.cancel();
             }
             Log.i(TAG, "send nav_arrive: " + payload);
+            DiagnosticLogRecorder.info(
+                    "HTTP",
+                    "发送 nav_arrive point=" + currentNode.getName()
+                            + ", bay=" + bay
+                            + ", wait=" + waitGeneration
+            );
             arrivalReportCall.enqueue(new Callback() {
                 @Override
                 public void onFailure(@NonNull Call call, @NonNull IOException exception) {
                     clearPendingArrivalReport(call);
                     if (!call.isCanceled()) {
                         Log.e(TAG, "nav_arrive request failed", exception);
+                        DiagnosticLogRecorder.error(
+                                "HTTP",
+                                "nav_arrive 失败 wait=" + waitGeneration
+                                        + "：" + exception.getMessage()
+                        );
                     }
                 }
 
@@ -3377,6 +3752,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                 : arrivalResponse.body().string();
                         Log.i(TAG, "nav_arrive response: status=" + arrivalResponse.code()
                                 + ", body=" + responseBody);
+                        DiagnosticLogRecorder.info(
+                                "HTTP",
+                                "nav_arrive 响应 wait=" + waitGeneration
+                                        + ", status=" + arrivalResponse.code()
+                        );
                     } finally {
                         clearPendingArrivalReport(call);
                     }
@@ -3384,6 +3764,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             });
         } catch (JSONException exception) {
             Log.e(TAG, "failed to create nav_arrive payload", exception);
+            DiagnosticLogRecorder.error(
+                    "HTTP",
+                    "创建 nav_arrive 请求失败：" + exception.getMessage()
+            );
         }
     }
 
@@ -3395,6 +3779,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         if (arrivalReportCall != null) {
             arrivalReportCall.cancel();
+            DiagnosticLogRecorder.debug("HTTP", "取消未完成 nav_arrive 请求");
         }
     }
 
@@ -3444,6 +3829,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             refreshPointBindingUi();
         }
         Log.d(TAG, "screen compartment route cancelled: " + reason);
+        DiagnosticLogRecorder.info(
+                "DELIVERY",
+                "屏幕仓位任务取消 reason=" + reason
+                        + ", wasActive=" + deliveryRouteWasActive
+        );
     }
 
     private void navigatenext() {
@@ -3633,10 +4023,21 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (!navigationTaskActive
                 || sessionGeneration != activeNavigationSessionGeneration) {
             Log.d(TAG, "ignore stale route prepared: session=" + sessionGeneration);
+            DiagnosticLogRecorder.warn(
+                    "NAV",
+                    "忽略旧路线准备完成 session=" + sessionGeneration
+                            + ", activeSession=" + activeNavigationSessionGeneration
+            );
             return;
         }
         clearNavigationPrepareTimeout();
         Log.d("navigatenext","readyGo=====");
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "路线准备完成并发送 readyGo(true) task=" + activeNavigationTaskGeneration
+                        + ", session=" + sessionGeneration
+                        + ", preparedNodes=" + (routeNodes == null ? 0 : routeNodes.length)
+        );
         NavManager.getInstance().readyGo(true);
     }
 
@@ -3658,8 +4059,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         if (sessionGeneration != activeNavigationSessionGeneration) {
             Log.d(TAG, "ignore stale navigation error: session=" + sessionGeneration);
+            DiagnosticLogRecorder.warn(
+                    "NAV",
+                    "忽略旧导航错误 code=" + code + ", session=" + sessionGeneration
+            );
             return;
         }
+        DiagnosticLogRecorder.error(
+                "NAV",
+                "导航错误 code=" + code
+                        + ", task=" + activeNavigationTaskGeneration
+                        + ", session=" + sessionGeneration
+        );
         clearNavigationPrepareTimeout();
         if (screenCompartmentRouteActive) {
             cancelScreenCompartmentRoute("导航错误：" + code);
@@ -3686,6 +4097,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
             Log.d("Charger===", "event = " + event +
                     " Power = " + chargerInfo.getPower() + " ChargeEvent = " + chargerInfo.getEvent());
+            DiagnosticLogRecorder.info(
+                    "CHARGER",
+                    "充电信息 event=" + event
+                            + ", power=" + chargerInfo.getPower()
+                            + ", chargeEvent=" + chargerInfo.getEvent()
+            );
         }
 
         @Override
@@ -3698,12 +4115,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 upstreamChargeTaskActive = false;
             }
             Log.d("Charger===", "status = " + status);
+            DiagnosticLogRecorder.info(
+                    "CHARGER",
+                    "充电状态 status=" + status
+                            + ", isCharging=" + isCharging
+                            + ", upstreamChargeActive=" + upstreamChargeTaskActive
+            );
         }
 
         @Override
         public void onError(int errorCode) {
             upstreamChargeTaskActive = false;
             Log.d("Charger===", "errorCode = " + errorCode);
+            DiagnosticLogRecorder.error(
+                    "CHARGER",
+                    "充电模块错误 code=" + errorCode
+            );
         }
     };
 }

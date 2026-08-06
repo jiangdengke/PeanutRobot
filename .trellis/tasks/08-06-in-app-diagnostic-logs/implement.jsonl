@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有 AlertDialog、操作卡片和日志调用方式，避免重复 UI 与状态机制。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"约束业务事件、线程安全缓冲、私有文件轮转、弹窗快照和剪贴板之间的数据流。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"遵循应用内诊断时间线的格式、有界内存、有界异步队列、私有文件轮转、清空顺序和敏感信息约束。"}
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"确保接入诊断日志时不改变导航实例、任务代次、到位门控、等待推进和抢占协议。"}

@@ -736,3 +736,89 @@
 - `app/build.gradle`：更新应用版本为 `1.0.12-beta.15`，`versionCode` 更新为 `26`。
 - `progress.md`：追加本次预发布准备、验证证据、文件清单和回滚点。
 - 回滚点：功能提交 `1e4d847`；发布提交完成后优先执行 `git revert <release-commit>` 回退版本号，不回退已完成的地图和配送功能。
+
+## 2026-07-21 - Task: 固定主界面横屏方向
+### What was done
+- 将 `.MainActivity` 的 Manifest 屏幕方向从固定竖屏改为固定横屏，避免横屏平板或模拟器以竖屏窗口运行并挤压三栏布局。
+- 同步地图使用文档和当前任务 PRD，明确 Activity 方向由 Manifest 控制，`centerCrop` 只负责地图缩放与裁切；目标设备视觉验收继续保持未完成。
+
+### Testing
+- `git diff --ignore-space-at-eol -- app/src/main/AndroidManifest.xml`：退出成功，未发现既有行尾差异之外的额外语义变化；结合提交版本与工作树配置检查，确认目标属性仅由 `portrait` 改为 `landscape`。
+- `ReadLints`：检查 Manifest、地图文档和任务 PRD，未返回 IDE 诊断。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；仅报告项目既有的 Android Gradle Plugin、SDK XML 版本和 Manifest 重复权限警告。
+- 未连接目标横屏平板或模拟器；仍需启动 App 复查窗口是否占满横屏、两侧黑边是否消失，以及左中右三栏是否恢复预期宽度。
+
+### Notes
+- `app/src/main/AndroidManifest.xml`：仅将 `.MainActivity` 的 `android:screenOrientation` 从 `portrait` 改为 `landscape`，保留现有编码、行尾和其他工作区差异。
+- `docs/room-map-preview.md`：说明主界面固定横屏，以及 `centerCrop` 不控制 Activity 方向。
+- `.trellis/tasks/07-21-map-point-overlay/prd.md`：补充固定横屏要求和可自动证明的配置验收项，保留目标设备视觉验收未勾选。
+- `progress.md`：仅在末尾追加本轮改动、验证证据、文件清单和回滚点。
+- 回滚点：本节追加前的未提交工作区状态。回滚时仅将 Manifest 目标属性精确改回 `portrait`，删除地图文档新增段落、PRD 新增的要求与配置验收项及本节；禁止整文件 `git restore`，以免覆盖 Manifest 既有行尾差异或其他未提交工作。
+
+## 2026-07-21 - Task: 取消固定主界面横屏方向
+### What was done
+- 将 `.MainActivity` 的 Manifest 屏幕方向从上一轮未提交的 `landscape` 精确恢复为 HEAD 的 `portrait`，保留该文件原有未提交行尾差异和其他内容。
+- 删除地图使用文档中上一轮新增的固定横屏说明，并删除当前任务 PRD 中上一轮新增的固定横屏 requirement 和静态 acceptance 条目；其他内容保持不变。
+- 本轮回退未暂存、未提交、未推送、未发布，也未修改 `MainActivity` 导航逻辑或处理“编辑地图”按钮。
+
+### Testing
+- `git diff --ignore-space-at-eol -- app/src/main/AndroidManifest.xml`：无输出，确认忽略行尾后 HEAD 与工作树不再有 `screenOrientation` 语义差异；工作树属性读取为 `portrait`。
+- 静态搜索：`docs/room-map-preview.md` 和任务 PRD 不再包含上一轮固定横屏说明、requirement 或 `landscape` acceptance 条目。
+- `python3 ./.trellis/scripts/task.py validate 07-21-map-point-overlay`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；仅报告项目既有的 Android Gradle Plugin、SDK XML 版本和 Manifest 重复权限警告。
+- `git diff --cached --name-only`：无输出，暂存区为空。
+
+### Notes
+- `progress.md` 按仓库规则仅在末尾追加本节，保留既有“固定主界面横屏方向”历史记录，不删除或修改已有记录。
+- 保留施工前已有工作区内容和既有回滚点；未修改或还原 `NavManager.java`、`MmkvUtils.java` 和根目录 JPG。
+- 回滚点：本节追加前、已精确取消固定横屏但尚未记录本节的未提交工作区状态；本轮回退明确不形成提交或发布。
+
+## 2026-08-06 - Task: 规划应用内诊断日志窗口
+### What was done
+- 暂停对导航几秒停止和回充后不移动问题的直接修复，规划在主界面增加可滚动、可清空、可复制的应用内诊断日志窗口。
+- 确认普通 App 不依赖读取完整系统 Logcat，第一版以有容量上限的线程安全缓冲区记录导航、回充、上游任务和到位等待等关键业务时间线。
+- 明确诊断窗口只用于观察和复制，不改变机器人导航、回充、HTTP、WebSocket 或到位推进行为。
+
+### Testing
+- 检查当前右侧操作区布局，确认可增加与现有操作卡片一致的“运行日志”入口。
+- 检查当前 `MainActivity` 日志和弹窗模式，确认可复用 Android `AlertDialog`、可滚动文本和系统剪贴板，不需要增加第三方依赖。
+- 本轮仅创建任务和 PRD，尚未修改 Android 业务代码，因此未执行构建验证。
+
+### Notes
+- `.trellis/tasks/08-06-in-app-diagnostic-logs/task.json`：新增应用内诊断日志窗口任务元数据。
+- `.trellis/tasks/08-06-in-app-diagnostic-logs/prd.md`：记录目标、可靠日志来源、可选持久化方案、验收标准和明确排除项。
+- `.trellis/tasks/08-06-in-app-diagnostic-logs/implement.jsonl`：保留后续实施上下文文件，确认方案后再填充有效规范。
+- `.trellis/tasks/08-06-in-app-diagnostic-logs/check.jsonl`：保留后续检查上下文文件，确认方案后再填充有效规范。
+- `progress.md`：仅在末尾追加本轮规划记录。
+- 回滚点：删除 `.trellis/tasks/08-06-in-app-diagnostic-logs/`，并按项目历史记录规则追加取消说明；本轮未修改 Android 业务代码。
+
+## 2026-08-06 - Task: 实现应用内诊断日志窗口
+### What was done
+- 新增应用级诊断记录器，在 `MyApplication` 启动时加载 App 私有目录中的历史日志；记录格式统一为时间、级别、模块和单行消息，并继续镜像到 Android Logcat。
+- 使用 256 KiB 线程安全内存快照、最多 4 个 256 KiB 轮转文件和最多 512 个待写操作的有界单线程队列；磁盘缓慢或失败时丢弃额外文件操作，不阻塞导航、回充或主线程回调。
+- 右侧屏幕操作组新增“运行日志”卡片，弹窗支持滚动查看、手动刷新、复制全部、清空和关闭；清空先立即清除内存，再按队列顺序删除私有文件，并在实际结果返回后提示。
+- 为导航任务创建、路线准备、SDK 状态、`STATE_RUNNING`、`STATE_DESTINATION`、`readyGo(false)`、导航停止/失效、回充状态、上游 HTTP、仓库 WebSocket、到位等待、pickup、超时和 Activity 生命周期增加只观察不参与控制分支的诊断事件。
+- 将诊断目录从 Android 云备份和设备迁移中排除；没有记录 SDK secret、锁屏密码、认证信息或完整上游请求体。
+- 新增日志缓冲与轮转文件测试，覆盖格式、容量淘汰、清空、并发写入、UTF-8 和代理对截断、跨实例读取、轮转顺序、超大记录及无效目录失败。
+- 新增 `docs/in-app-diagnostic-logs.md` 使用和现场时间线判断文档，并将有界诊断记录约束写入 Trellis logging code-spec。
+
+### Testing
+- 聚焦测试 `DiagnosticLogBufferTest` 和 `RotatingLogFileStoreTest` 两次执行均 BUILD SUCCESSFUL。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；全部单元测试和 Debug APK 构建通过，产物为 `app/build/outputs/apk/debug/app-debug.apk`。
+- `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon`：单元测试和 `assembleDebug` 已执行，但项目级 `lintDebug` 被 6 个既有错误阻断，包括 `item_point.xml` 缺少 ConstraintLayout 约束、既有 StorageVolume API 23 兼容问题、Manifest 通知权限和既有 URI flag 常量问题；新诊断日志类、图标、备份规则和按钮没有出现在 Lint 问题报告中。
+- `python3 ./.trellis/scripts/task.py validate 08-06-in-app-diagnostic-logs`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `git diff --ignore-cr-at-eol -- AndroidManifest.xml NavManager.java MmkvUtils.java`：无输出，确认三个保护文件仍只有施工前行尾差异；暂存区保持为空。
+- 未连接目标机器人；仍需实机复现“立即出发后停止”，打开运行日志并验证查看、刷新、复制、清空、跨重启保留和右侧触控布局。
+
+### Notes
+- `DiagnosticLogRecorder.java`、`DiagnosticLogBuffer.java`、`RotatingLogFileStore.java`：新增有界内存、异步队列和私有轮转文件实现，文件失败不向业务调用方抛出。
+- `MainActivity.java`、`activity_main.xml`、`ic_runtime_logs.xml`：新增日志入口、弹窗和关键故障时间线观察点；未改导航、回充、HTTP、WebSocket 或到位等待的既有控制决策。
+- `MyApplication.java`：在其他 App 初始化前启动诊断记录器，以保留尽可能完整的进程时间线。
+- `backup_rules.xml`、`data_extraction_rules.xml`：排除 `diagnostic_logs/` 云备份和设备迁移。
+- `.trellis/spec/backend/logging-guidelines.md` 和 index：记录可复用的诊断日志实现合同；任务 PRD 保留目标设备验收未勾选。
+- 未修改、还原、删除、暂存或提交施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
+- 回滚点：本节追加前的未提交工作区状态。回滚本轮时仅删除新增诊断 Java 类、测试、图标和文档，精确移除 `MainActivity.java`、`MyApplication.java`、`activity_main.xml`、两个备份规则、Trellis spec/index 和任务文件中的本轮增量，并追加回滚记录；禁止整文件 `git restore`，以免覆盖施工前已有改动。
