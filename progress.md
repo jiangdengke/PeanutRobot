@@ -822,3 +822,18 @@
 - `.trellis/spec/backend/logging-guidelines.md` 和 index：记录可复用的诊断日志实现合同；任务 PRD 保留目标设备验收未勾选。
 - 未修改、还原、删除、暂存或提交施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
 - 回滚点：本节追加前的未提交工作区状态。回滚本轮时仅删除新增诊断 Java 类、测试、图标和文档，精确移除 `MainActivity.java`、`MyApplication.java`、`activity_main.xml`、两个备份规则、Trellis spec/index 和任务文件中的本轮增量，并追加回滚记录；禁止整文件 `git restore`，以免覆盖施工前已有改动。
+
+## 2026-08-06 - Task: 发布 v1.0.12-beta.16
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.16`，`versionCode` 单调递增为 `27`。
+- 准备通过 annotated tag `v1.0.12-beta.16` 触发 Android Release 工作流，发布应用内运行日志、异步轮转存储和关键机器人业务时间线能力。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --refresh-dependencies`：BUILD SUCCESSFUL；全部单元测试和 Debug APK 构建通过。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML 版本及 Manifest 重复权限警告，本次版本更新未新增构建错误。
+- 功能提交前已通过 Trellis 任务校验、whitespace 检查和诊断日志聚焦测试；项目级 Lint 仍存在与本功能无关的既有错误，已在上一轮实现记录中列明。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.16`，`versionCode` 更新为 `27`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 回滚点：功能提交 `d930ee7`；发布提交完成后优先执行 `git revert <release-commit>` 回退版本号，不直接改写已推送历史，也不回退诊断日志功能提交。
