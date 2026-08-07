@@ -863,3 +863,20 @@
 - `.trellis/tasks/08-06-in-app-diagnostic-logs/prd.md`、`docs/in-app-diagnostic-logs.md`、`.trellis/spec/backend/logging-guidelines.md`：同步导出要求、验收、决策、DoD、路径、内容边界和错误矩阵。
 - 明确保留并未修改、还原、删除、格式化或暂存施工前路径 `app/src/main/AndroidManifest.xml`、`app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java`、`app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java` 和根目录 `acb04aae21ce9e365ccbd9596e7d1a3d.jpg`。
 - 回滚点：本节追加前的未提交工作区状态。回滚本轮时删除两个新增导出类和新增单元测试，通过 IDE 本地历史精确移除 `MainActivity.java`、任务 PRD、现场文档、logging spec 和本节的导出增量；禁止整文件 `git restore`，以免覆盖施工前保护内容或既有诊断日志实现。
+
+## 2026-08-07 - Task: 发布 v1.0.12-beta.17
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.17`，`versionCode` 单调递增为 `28`。
+- 准备通过 annotated tag `v1.0.12-beta.17` 触发 Android Release 工作流，发布运行日志手动导出到系统下载目录的能力。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --refresh-dependencies`：BUILD SUCCESSFUL；全部单元测试和 Debug APK 构建通过。
+- 构建仅报告项目既有的 Android Gradle Plugin、SDK XML 版本及 Manifest 重复权限警告，本次版本更新未新增构建错误。
+- 日志导出功能提交前已通过 Trellis 校验、whitespace 检查、IDE linter 检查及日志导出聚焦测试。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.17`，`versionCode` 更新为 `28`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本只发布诊断日志导出能力，不包含尚未实施的回充后同点再次出发修复。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
+- 回滚点：日志导出功能提交 `d8883aa`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，不改写已推送历史。
