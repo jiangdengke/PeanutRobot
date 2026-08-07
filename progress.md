@@ -837,3 +837,29 @@
 - `app/build.gradle`：更新应用版本为 `1.0.12-beta.16`，`versionCode` 更新为 `27`。
 - `progress.md`：追加本次预发布准备、验证证据和回滚点。
 - 回滚点：功能提交 `d930ee7`；发布提交完成后优先执行 `git revert <release-commit>` 回退版本号，不直接改写已推送历史，也不回退诊断日志功能提交。
+
+## 2026-08-07 - Task: 扩展应用内诊断日志手动导出
+### What was done
+- 将运行日志弹窗操作扩展为“刷新、复制全部、导出文件、清空、关闭”；点击导出时立即保留不可变 `DiagnosticLogRecorder.snapshot()`，空快照只提示且不创建文件。
+- 新增独立 `DiagnosticLogExporter`，通过最多等待 4 个任务的有界单线程队列执行磁盘 I/O；队列饱和、调度失败、I/O、运行时或安全异常均返回结果，不阻塞主线程或改变记录器持久化队列。
+- Android 10/API 29 及以上使用 `MediaStore.Downloads` 写入 `Download/PeanutRobotLogs/`，通过 `RELATIVE_PATH` 和 `IS_PENDING` 安全发布且不申请存储权限；Android 9/API 28 及以下写入公共 Downloads，并只在手动导出时用独立 request code 申请 `WRITE_EXTERNAL_STORAGE`。
+- 旧版权限请求前保留点击时快照，授权后导出同一字符串；拒绝后清理 pending snapshot 并提示。权限和写盘期间禁用导出按钮，弹窗关闭后释放按钮引用但不丢失待导出的快照。
+- 提取纯 Java 文件名和 UTF-8 写入 helper；导出字节与 snapshot 精确一致，不追加 header、尾换行或系统 Logcat，失败时清理 MediaStore pending 条目或旧版半成品。
+- 更新任务 PRD、现场文档和 logging spec 的导出合同、系统版本差异、错误矩阵、测试要求及未完成实机验收项；任务状态继续保持 `in_progress`，未归档。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest --tests com.yuandaima.peanutrobot.util.DiagnosticLogExportFileTest --tests com.yuandaima.peanutrobot.util.DiagnosticLogBufferTest --tests com.yuandaima.peanutrobot.util.RotatingLogFileStoreTest --no-daemon`：BUILD SUCCESSFUL；覆盖 Unicode 精确 UTF-8、普通/空内容、无额外字节、文件名格式，以及既有缓冲和轮转行为。
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；Debug APK 构建通过，产物为 `app/build/outputs/apk/debug/app-debug.apk`。仅出现项目既有的 Android Gradle Plugin compileSdk 兼容和 SDK XML 版本警告。
+- `python3 ./.trellis/scripts/task.py validate 08-06-in-app-diagnostic-logs`：通过，`implement.jsonl` 和 `check.jsonl` 各 4 项有效。
+- `git -c core.whitespace=cr-at-eol diff --check`：通过。
+- `git diff --ignore-cr-at-eol -- app/src/main/AndroidManifest.xml app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java`：无输出；三个保护文件仍只有施工前行尾差异。`git diff --cached --name-only` 无输出，暂存区保持为空。
+- 未运行项目级 lint；用户已明确无需修复项目既有 lint 错误。本轮未暂存、提交、推送或发布。
+- 未连接目标机器人；仍需实机验证 API 29+ MediaStore 可见性和精确文件字节、API 28 及以下权限授权/拒绝路径、系统下载路径提示、按钮状态，以及原有日志采集、复制、清空和导航故障复现。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加独立导出权限和按钮状态流程；从通用启动权限中移除存储权限，确保只在 API 28 及以下的手动导出点击后申请写权限，不改变导航、回充、HTTP、WebSocket、到位等待或 pickup 控制分支。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/DiagnosticLogExporter.java`：新增版本化共享下载写入、有界后台执行、半成品清理和结果模型。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/DiagnosticLogExportFile.java`、`app/src/test/java/com/yuandaima/peanutrobot/util/DiagnosticLogExportFileTest.java`：新增纯 Java 文件名和 UTF-8 写入逻辑及聚焦测试。
+- `.trellis/tasks/08-06-in-app-diagnostic-logs/prd.md`、`docs/in-app-diagnostic-logs.md`、`.trellis/spec/backend/logging-guidelines.md`：同步导出要求、验收、决策、DoD、路径、内容边界和错误矩阵。
+- 明确保留并未修改、还原、删除、格式化或暂存施工前路径 `app/src/main/AndroidManifest.xml`、`app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java`、`app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java` 和根目录 `acb04aae21ce9e365ccbd9596e7d1a3d.jpg`。
+- 回滚点：本节追加前的未提交工作区状态。回滚本轮时删除两个新增导出类和新增单元测试，通过 IDE 本地历史精确移除 `MainActivity.java`、任务 PRD、现场文档、logging spec 和本节的导出增量；禁止整文件 `git restore`，以免覆盖施工前保护内容或既有诊断日志实现。

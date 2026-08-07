@@ -35,6 +35,14 @@ String snapshot = DiagnosticLogRecorder.snapshot();
 DiagnosticLogRecorder.clear(success -> updateClearResult(success));
 ```
 
+Manual file export must consume one immutable snapshot captured by the UI at
+the moment the operator taps export:
+
+```java
+String snapshotToExport = DiagnosticLogRecorder.snapshot();
+DiagnosticLogExporter.export(context, snapshotToExport, result -> showResult(result));
+```
+
 ### 3. Contracts
 
 - Each event is one line: `yyyy-MM-dd HH:mm:ss.SSS | LEVEL | MODULE | message`.
@@ -53,6 +61,28 @@ DiagnosticLogRecorder.clear(success -> updateClearResult(success));
   them into navigation, charging, HTTP, or pickup behavior.
 - Exclude the diagnostic directory from Android cloud backup and device transfer.
 - Continue mirroring diagnostic events to Logcat for adb correlation.
+- The manual export source is exactly the captured `snapshot()` string. Encode
+  that string as UTF-8 without a header, trailing newline, Logcat merge, or a
+  second recorder read after permission handling.
+- Do not create an export for an empty snapshot. Name exports like
+  `robot-runtime-yyyyMMdd-HHmmss-SSS.txt` and report the resulting path.
+- On API 29+, insert into `MediaStore.Downloads` with
+  `RELATIVE_PATH=Download/PeanutRobotLogs` and `IS_PENDING=1`, write the complete
+  snapshot, then publish with `IS_PENDING=0`. Do not request storage permission.
+- On API 28 and below, write under the public
+  `Downloads/PeanutRobotLogs/` directory. Request `WRITE_EXTERNAL_STORAGE` only
+  after the export tap, with a request code separate from robot-core startup.
+  Retain the captured immutable snapshot until the permission result; clear it
+  on denial.
+- Run exports on a dedicated bounded single-thread executor. Queue saturation
+  must fail immediately without blocking the main thread or consuming recorder
+  persistence capacity.
+- Disable the active export button while permission or I/O is pending. The
+  permission callback must still be able to continue without a live button
+  reference if the dialog was dismissed.
+- Catch `IOException`, `RuntimeException`, and `SecurityException`, delete an
+  incomplete MediaStore entry or legacy partial file, and return a result for
+  main-thread operator feedback. Export failures must not reach robot control.
 
 ### 4. Validation & Error Matrix
 
@@ -67,6 +97,14 @@ DiagnosticLogRecorder.clear(success -> updateClearResult(success));
 | Directory creation/read/write/delete fails | Log the failure to Logcat; do not propagate it to business code |
 | Clear races with older queued appends | Remove older pending appends and execute deletion before later appends |
 | Clipboard cannot accept the snapshot | Catch the runtime failure and show an operator error |
+| Export snapshot is empty | Show an operator message and do not create a file or request permission |
+| API 29+ export is requested | Use MediaStore pending publication and do not request storage permission |
+| API 28 or below lacks write permission | Preserve the tap-time snapshot, request only `WRITE_EXTERNAL_STORAGE` with the export request code, then export that same snapshot after grant |
+| Legacy export permission is denied | Clear the pending snapshot, restore a live button if available, show a message, and do not enter the robot-core permission branch |
+| Export queue is full | Reject immediately, restore the button, and show a retry message without blocking the caller |
+| MediaStore insert, stream, write, or publish fails | Delete the pending entry, report failure, and never expose a partial published file |
+| Legacy directory or write fails | Delete any newly created partial file and report failure |
+| Export dialog closes while permission is pending | Release the button reference but retain and export the captured snapshot after grant |
 
 ### 5. Good / Base / Bad Cases
 
@@ -92,6 +130,14 @@ DiagnosticLogRecorder.clear(success -> updateClearResult(success));
   cannot exceed one file's limit.
 - Assert invalid storage paths report I/O failure at the storage boundary; the
   Android recorder must catch that failure.
+- Assert the pure-Java export writer produces byte-for-byte UTF-8 for Unicode
+  and ordinary snapshots, writes zero bytes for an empty string, and never adds
+  a header or trailing newline.
+- Assert generated export names match
+  `robot-runtime-yyyyMMdd-HHmmss-SSS.txt` without depending on Android runtime.
+- Keep MediaStore and runtime-permission behavior out of fragile local JVM
+  tests; verify those Android boundaries through compilation, static review,
+  and target-device acceptance.
 - Run `:app:testDebugUnitTest` and `:app:assembleDebug` after integration changes.
 
 ### 7. Wrong vs Correct
@@ -115,3 +161,8 @@ DiagnosticLogRecorder.info(
         "accepted STATE_RUNNING task=" + taskGeneration + ", position=" + position
 );
 ```
+
+For operator export, capturing after a permission dialog is wrong because the
+file can silently include later events. Capture first, retain the immutable
+string across permission handling, and pass that exact value to the background
+exporter.

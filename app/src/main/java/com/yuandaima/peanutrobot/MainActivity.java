@@ -93,6 +93,7 @@ import com.yuandaima.peanutrobot.presentation.PresentationCoucou;
 import com.yuandaima.peanutrobot.server.PickupStatusServer;
 import com.yuandaima.peanutrobot.server.WebServer;
 import com.yuandaima.peanutrobot.server.WebSocketService;
+import com.yuandaima.peanutrobot.util.DiagnosticLogExporter;
 import com.yuandaima.peanutrobot.util.DiagnosticLogRecorder;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
@@ -151,6 +152,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final okhttp3.MediaType JSON_MEDIA_TYPE =
             okhttp3.MediaType.get("application/json; charset=utf-8");
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
+    private static final int REQUEST_DIAGNOSTIC_LOG_EXPORT_PERMISSION = 2002;
     private static final String WAREHOUSE_TASK_WS = "ws://192.168.112.194:9098";
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
     private static final int GO_CHARGE_TASK_ID = 789115;
@@ -195,6 +197,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private int activeCompartmentIndex = -1;
     private TtsUntil ttsUntil;
     private boolean isPermissionRequested;
+    private String pendingDiagnosticLogExportSnapshot;
+    private Button pendingDiagnosticLogExportButton;
 
 
     private WebSocketService webSocketService;
@@ -786,9 +790,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private List<String> requiredPermissions = Arrays.asList(
             Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            Manifest.permission.RECORD_AUDIO
     );
     private static final int REQUEST_PERMISSIONS = 1001;
     private boolean checkPermissions() {
@@ -807,6 +809,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_DIAGNOSTIC_LOG_EXPORT_PERMISSION) {
+            handleDiagnosticLogExportPermissionResult(grantResults);
+            return;
+        }
         if (requestCode == REQUEST_PERMISSIONS) {
             boolean allGranted = true;
             for (int result : grantResults) {
@@ -846,7 +852,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void showPermissionDeniedDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("权限被拒绝")
-                .setMessage("需要摄像头、录音和存储权限才能使用本应用")
+                .setMessage("需要摄像头和录音权限才能使用本应用")
                 .setPositiveButton("去设置", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
@@ -2514,8 +2520,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             String[] permissions = {
                     android.Manifest.permission.ACCESS_NETWORK_STATE,
                     android.Manifest.permission.INTERNET,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
                     android.Manifest.permission.ACCESS_WIFI_STATE,
                     Manifest.permission.READ_PHONE_STATE,
             };
@@ -2538,6 +2542,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onDestroy start");
         cancelScreenCompartmentRoute("Activity 销毁");
         activityDestroyed = true;
+        pendingDiagnosticLogExportSnapshot = null;
+        pendingDiagnosticLogExportButton = null;
         handler.removeCallbacks(idleLockRunnable);
         handler.removeCallbacks(pointRefreshRetryRunnable);
         handler.removeCallbacks(startupGoChargeRunnable);
@@ -2755,7 +2761,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.END);
-        String[] actionLabels = {"刷新", "复制全部", "清空", "关闭"};
+        String[] actionLabels = {"刷新", "复制全部", "导出文件", "清空", "关闭"};
         Button[] actionButtons = new Button[actionLabels.length];
         for (int index = 0; index < actionLabels.length; index++) {
             Button actionButton = new Button(this);
@@ -2802,7 +2808,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 tip("运行日志复制失败，请重试");
             }
         });
-        actionButtons[2].setOnClickListener(view -> new AlertDialog.Builder(this)
+        actionButtons[2].setOnClickListener(view -> requestDiagnosticLogExport(
+                actionButtons[2]
+        ));
+        actionButtons[3].setOnClickListener(view -> new AlertDialog.Builder(this)
                 .setTitle("清空运行日志")
                 .setMessage("仅清除诊断记录，不会停止或改变当前机器人任务。")
                 .setNegativeButton("取消", null)
@@ -2816,7 +2825,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     refreshLogs.run();
                 })
                 .show());
-        actionButtons[3].setOnClickListener(view -> logDialog.dismiss());
+        actionButtons[4].setOnClickListener(view -> logDialog.dismiss());
 
         logDialog.setOnShowListener(dialog -> {
             Window dialogWindow = logDialog.getWindow();
@@ -2829,8 +2838,90 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 );
             }
         });
+        logDialog.setOnDismissListener(dialog -> {
+            if (pendingDiagnosticLogExportButton == actionButtons[2]) {
+                pendingDiagnosticLogExportButton = null;
+            }
+        });
         refreshLogs.run();
         logDialog.show();
+    }
+
+    private void requestDiagnosticLogExport(Button exportButton) {
+        String snapshot = DiagnosticLogRecorder.snapshot();
+        if (TextUtils.isEmpty(snapshot)) {
+            tip("暂无可导出的运行日志");
+            return;
+        }
+
+        exportButton.setEnabled(false);
+        boolean requiresLegacyWritePermission = Build.VERSION.SDK_INT <= Build.VERSION_CODES.P;
+        boolean hasLegacyWritePermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED;
+        if (requiresLegacyWritePermission && !hasLegacyWritePermission) {
+            pendingDiagnosticLogExportSnapshot = snapshot;
+            pendingDiagnosticLogExportButton = exportButton;
+            try {
+                ActivityCompat.requestPermissions(
+                        this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        REQUEST_DIAGNOSTIC_LOG_EXPORT_PERMISSION
+                );
+            } catch (RuntimeException exception) {
+                Log.e(TAG, "request diagnostic log export permission failed", exception);
+                pendingDiagnosticLogExportSnapshot = null;
+                pendingDiagnosticLogExportButton = null;
+                exportButton.setEnabled(true);
+                tip("无法申请日志导出权限");
+            }
+            return;
+        }
+
+        startDiagnosticLogExport(snapshot, exportButton);
+    }
+
+    private void handleDiagnosticLogExportPermissionResult(int[] grantResults) {
+        String snapshot = pendingDiagnosticLogExportSnapshot;
+        Button exportButton = pendingDiagnosticLogExportButton;
+        pendingDiagnosticLogExportSnapshot = null;
+        pendingDiagnosticLogExportButton = null;
+
+        boolean permissionGranted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (!permissionGranted) {
+            if (exportButton != null) {
+                exportButton.setEnabled(true);
+            }
+            tip("未授予存储权限，运行日志未导出");
+            return;
+        }
+        if (TextUtils.isEmpty(snapshot)) {
+            if (exportButton != null) {
+                exportButton.setEnabled(true);
+            }
+            tip("待导出的运行日志已失效，请重试");
+            return;
+        }
+
+        startDiagnosticLogExport(snapshot, exportButton);
+    }
+
+    private void startDiagnosticLogExport(String snapshot, Button exportButton) {
+        DiagnosticLogExporter.export(this, snapshot, result -> runOnUiThread(() -> {
+            if (exportButton != null) {
+                exportButton.setEnabled(true);
+            }
+            if (activityDestroyed) {
+                return;
+            }
+            if (result.isSuccess()) {
+                tip("运行日志已导出到 " + result.getDisplayPath());
+            } else {
+                tip(result.getErrorMessage());
+            }
+        }));
     }
 
     private void sendGoChargeTask() {
