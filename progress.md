@@ -880,3 +880,49 @@
 - 本版本只发布诊断日志导出能力，不包含尚未实施的回充后同点再次出发修复。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
 - 回滚点：日志导出功能提交 `d8883aa`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，不改写已推送历史。
+
+## 2026-08-11 - Task: 修复充电状态下屏幕立即出发
+### What was done
+- 保留屏幕仓位任务原有的路线构造、任务激活和导航会话复用行为；充电控制已停止时仍立即进入现有路线准备流程。
+- 当正在充电或上游回充任务仍活动时，保存本次路线快照、安装十秒有界超时，再发送 `CHARGE_ACTION_STOP`；只有充电状态 `1` 或 `6` 能一次性继续该路线。
+- 将充电释放确认和错误处理切回主线程；充电模块不可用、停止指令运行时异常、模块错误、超时、任务抢占和 Activity 销毁都会清除待出发路线及超时，阻止迟到回调强制启动导航。
+- 用户可见失败会取消当前屏幕配送、恢复“立即出发”并显示可重试中文提示；新增请求、确认、继续、取消和失败诊断事件，未改变上游 `send_point` 或导航状态处理。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；全部 Debug 单元测试和 APK 构建通过，仅保留项目既有 Android Gradle Plugin、SDK XML、过时 API 和 unchecked 警告。
+- `python3 ./.trellis/scripts/task.py validate 08-11-screen-departure-after-charge`：通过，`implement.jsonl` 和 `check.jsonl` 各 3 项有效。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：通过。
+- IDE linter 检查 `MainActivity.java`：未报告诊断。
+- 静态复核确认屏幕“立即出发”改走充电交接入口，上游 `send_point` 仍直接调用原有 `prepareNav(routeNodes)`；未连接目标机器人，充电状态 `4 -> 6/1`、超时和模块错误仍需按 PRD 执行实机验收。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：新增屏幕出发充电控制交接、十秒超时、一次性状态确认、失败恢复及全取消路径清理。
+- `docs/compartment-point-binding.md`：补充屏幕出发在充电状态下的等待、确认、失败和抢占行为说明。
+- `progress.md`：按仓库规则追加本轮实现、验证证据、文件清单和回滚方式。
+- 保留并未修改、还原、删除或暂存施工前已有的 `app/src/main/AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 和根目录 JPG；本轮未提交、推送或发布。
+- 回滚方式：在没有后续同文件改动的前提下执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/compartment-point-binding.md progress.md`，仅回退本轮三个已跟踪文件；不要处理施工前保护文件或任务目录。
+
+## 2026-08-11 - Task: 修正屏幕出发充电交接阻塞项
+### What was done
+- 屏幕出发需要等待充电控制释放时，先立即让旧导航任务失效并调用现有 `NavManager.stop()`，记录诊断事件后才安装交接等待和发送停止充电指令；充电控制未活动时仍直接进入原有路线准备流程。
+- 新增屏幕出发交接状态持有器，为每次交接分配单调递增代次，并让超时、充电释放状态、充电模块错误和同步停止指令异常只处理各自代次；取消或抢占会使旧代次失效，重复释放只消费路线一次。
+- 移除屏幕配送通用取消流程中“只因存在待交接路线就恢复立即出发按钮”的共享副作用；仅用户可见交接失败显式恢复按钮，手动 HTTP/UI 路径继续保留各自原有按钮处理。
+- 新增纯 Java 聚焦单元测试，覆盖重复释放一次性消费、取消代次不能消费或清除后继代次、当前失败可清除当前交接；同步更新现场文档中的立即停止旧导航和代次隔离说明。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest --tests com.yuandaima.peanutrobot.ScreenDepartureHandoffStateTest --no-daemon`：BUILD SUCCESSFUL，3 个交接代次聚焦场景通过。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；全部 Debug 单元测试和 APK 构建通过，仅保留项目既有 Android Gradle Plugin compileSdk 与 SDK XML 版本警告。
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；最终复核时强制重新执行 42 个任务，确认修改后的 Java 编译、完整单元测试和 Debug APK 打包均通过。
+- IDE linter 检查 `MainActivity.java`、`ScreenDepartureHandoffState.java` 和 `ScreenDepartureHandoffStateTest.java`：未报告诊断。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/compartment-point-binding.md progress.md`：通过；两个新增 Java 文件分别执行 `git diff --no-index --check /dev/null <file>`，无空白错误诊断，命令仅因存在新增内容返回预期的 no-index 差异状态 `1`。
+- `python3 ./.trellis/scripts/task.py validate 08-11-screen-departure-after-charge`：通过，`implement.jsonl` 和 `check.jsonl` 各 3 项有效。未连接目标机器人，仍需实机验证充电状态 `4 -> 6/1`、交接超时、模块错误和连续两次交接。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：恢复等待充电释放前的旧导航立即抢占，接入交接代次，并移除通用取消中的按钮恢复副作用。
+- `app/src/main/java/com/yuandaima/peanutrobot/ScreenDepartureHandoffState.java`：新增屏幕出发专用的路线快照、单调代次、一次性消费和按代次清除状态。
+- `app/src/test/java/com/yuandaima/peanutrobot/ScreenDepartureHandoffStateTest.java`：新增 3 个纯 Java 交接代次回归测试。
+- `docs/compartment-point-binding.md`：补充等待交接前立即停止旧导航和迟到回调代次隔离行为。
+- `.trellis/spec/backend/navigation-arrival-contract.md`：固化充电控制交接、十秒超时、一次性释放消费、代次隔离和实机验证合同。
+- `progress.md`：追加本轮修正、验证证据、文件清单和回滚点。
+- 保留并未修改、还原、删除、格式化或暂存施工前已有的 `app/src/main/AndroidManifest.xml`、`app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java`、`app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java` 和根目录 JPG。
+- 完整回滚本次屏幕出发充电交接任务时，可执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/compartment-point-binding.md progress.md .trellis/spec/backend/navigation-arrival-contract.md`，删除新增的 `ScreenDepartureHandoffState.java`、对应测试和 `.trellis/tasks/08-11-screen-departure-after-charge/`；不得处理上述保护文件。

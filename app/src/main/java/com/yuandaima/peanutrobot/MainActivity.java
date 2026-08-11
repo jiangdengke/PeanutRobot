@@ -142,6 +142,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final long ARRIVAL_WAIT_TIMEOUT_MS = 5 * 60 * 1000L;
     private static final long DELIVERY_COUNTDOWN_UPDATE_INTERVAL_MS = 1000L;
     private static final long NAVIGATION_PREPARE_TIMEOUT_MS = 10 * 1000L;
+    private static final long CHARGER_RELEASE_TIMEOUT_MS = 10 * 1000L;
     private static final String DELIVERY_STATUS_QUEUED = "等待配送";
     private static final String DELIVERY_STATUS_TRAVELING = "正在前往";
     private static final String DELIVERY_STATUS_WAITING = "等待取餐";
@@ -249,6 +250,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private int navigationRouteOffset = 0;
     private int arrivalWaitRoutePosition = -1;
     private Runnable navigationPrepareTimeoutRunnable;
+    private final ScreenDepartureHandoffState screenDepartureHandoffState =
+            new ScreenDepartureHandoffState();
+    private Runnable chargerReleaseTimeoutRunnable;
+    private long chargerReleaseTimeoutGeneration = ScreenDepartureHandoffState.NO_GENERATION;
     private Runnable arrivalWaitTimeoutRunnable;
     private Call pendingArrivalReportCall;
     private Integer focusedMapRobotPointId;
@@ -2694,7 +2699,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 //            node.setId(Integer.parseInt(editText.getText().toString()));
 //            node.setName("Point:" + editText.getText().toString());
 //            point.setRouteNode(node);
-            prepareNav(routeNodes);
+            startScreenDeparture(routeNodes);
 
         }else if (id==mBinding.tvSecondaryScreenDisplay.getId()){
             //   startHardwareTests(null);
@@ -3261,9 +3266,179 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         warehouseTaskWebSocketClient.connectionPool().evictAll();
     }
 
+    private void startScreenDeparture(List<RouteNode> selectedRouteNodes) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            List<RouteNode> routeSnapshot = selectedRouteNodes == null
+                    ? null
+                    : new ArrayList<>(selectedRouteNodes);
+            handler.post(() -> startScreenDeparture(routeSnapshot));
+            return;
+        }
+        if (activityDestroyed || selectedRouteNodes == null || selectedRouteNodes.isEmpty()) {
+            return;
+        }
+        if (!isCharging && !upstreamChargeTaskActive) {
+            prepareNav(selectedRouteNodes);
+            return;
+        }
+
+        invalidateNavigationTask("screen departure charger handoff");
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "调用 NavManager.stop reason=screen departure charger handoff"
+        );
+        NavManager.getInstance().stop();
+
+        long handoffGeneration = screenDepartureHandoffState.begin(selectedRouteNodes);
+        scheduleChargerReleaseTimeout(handoffGeneration);
+        DiagnosticLogRecorder.info(
+                "CHARGER",
+                "屏幕出发请求停止充电 handoff=" + handoffGeneration
+                        + ", isCharging=" + isCharging
+                        + ", upstreamChargeActive=" + upstreamChargeTaskActive
+                        + ", " + describeRoute(selectedRouteNodes)
+        );
+
+        PeanutCharger availableCharger = mPeanutCharger;
+        if (availableCharger == null) {
+            failPendingScreenDeparture(
+                    handoffGeneration,
+                    "charger unavailable",
+                    "充电模块未就绪",
+                    "充电模块未就绪，无法立即出发，请稍后重试"
+            );
+            return;
+        }
+        try {
+            availableCharger.performAction(PeanutCharger.CHARGE_ACTION_STOP);
+        } catch (RuntimeException exception) {
+            Log.e(TAG, "screen departure charger stop failed", exception);
+            failPendingScreenDeparture(
+                    handoffGeneration,
+                    "performAction " + exception.getClass().getSimpleName(),
+                    "停止充电指令失败",
+                    "停止充电失败，无法立即出发，请重试"
+            );
+        }
+    }
+
+    private void scheduleChargerReleaseTimeout(long handoffGeneration) {
+        clearChargerReleaseTimeout();
+        chargerReleaseTimeoutGeneration = handoffGeneration;
+        chargerReleaseTimeoutRunnable = () -> {
+            if (chargerReleaseTimeoutGeneration == handoffGeneration) {
+                chargerReleaseTimeoutRunnable = null;
+                chargerReleaseTimeoutGeneration = ScreenDepartureHandoffState.NO_GENERATION;
+            }
+            failPendingScreenDeparture(
+                    handoffGeneration,
+                    "release timeout",
+                    "等待充电控制释放超时",
+                    "停止充电超时，无法立即出发，请重试"
+            );
+        };
+        handler.postDelayed(chargerReleaseTimeoutRunnable, CHARGER_RELEASE_TIMEOUT_MS);
+    }
+
+    private void clearChargerReleaseTimeout() {
+        Runnable timeoutRunnable = chargerReleaseTimeoutRunnable;
+        chargerReleaseTimeoutRunnable = null;
+        chargerReleaseTimeoutGeneration = ScreenDepartureHandoffState.NO_GENERATION;
+        if (timeoutRunnable != null) {
+            handler.removeCallbacks(timeoutRunnable);
+        }
+    }
+
+    private void clearChargerReleaseTimeout(long handoffGeneration) {
+        if (chargerReleaseTimeoutGeneration == handoffGeneration) {
+            clearChargerReleaseTimeout();
+        }
+    }
+
+    private boolean cancelPendingScreenDeparture(String reason) {
+        long canceledGeneration = screenDepartureHandoffState.cancelCurrent();
+        if (canceledGeneration == ScreenDepartureHandoffState.NO_GENERATION) {
+            return false;
+        }
+        clearChargerReleaseTimeout(canceledGeneration);
+        DiagnosticLogRecorder.info(
+                "CHARGER",
+                "屏幕出发充电交接取消 handoff=" + canceledGeneration
+                        + ", reason=" + reason
+        );
+        return true;
+    }
+
+    private void continuePendingScreenDeparture(long handoffGeneration, int chargerStatus) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> continuePendingScreenDeparture(handoffGeneration, chargerStatus));
+            return;
+        }
+        if (chargerStatus != 1 && chargerStatus != 6) {
+            return;
+        }
+        List<RouteNode> routeSnapshot = screenDepartureHandoffState.consumeRoute(
+                handoffGeneration
+        );
+        if (routeSnapshot == null) {
+            return;
+        }
+        clearChargerReleaseTimeout(handoffGeneration);
+        if (activityDestroyed || !screenCompartmentRouteActive) {
+            DiagnosticLogRecorder.info(
+                    "CHARGER",
+                    "忽略已取消的屏幕出发充电确认 handoff=" + handoffGeneration
+                            + ", status=" + chargerStatus
+            );
+            return;
+        }
+        DiagnosticLogRecorder.info(
+                "CHARGER",
+                "屏幕出发确认充电控制已释放 handoff=" + handoffGeneration
+                        + ", status=" + chargerStatus
+        );
+        DiagnosticLogRecorder.info(
+                "NAV",
+                "充电交接完成，继续屏幕路线 handoff=" + handoffGeneration
+                        + ", " + describeRoute(routeSnapshot)
+        );
+        prepareNav(routeSnapshot);
+    }
+
+    private void failPendingScreenDeparture(
+            long handoffGeneration,
+            String diagnosticReason,
+            String cancellationReason,
+            String userMessage
+    ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> failPendingScreenDeparture(
+                    handoffGeneration,
+                    diagnosticReason,
+                    cancellationReason,
+                    userMessage
+            ));
+            return;
+        }
+        if (!screenDepartureHandoffState.clearIfCurrent(handoffGeneration)) {
+            return;
+        }
+        clearChargerReleaseTimeout(handoffGeneration);
+        DiagnosticLogRecorder.error(
+                "CHARGER",
+                "屏幕出发充电交接失败 handoff=" + handoffGeneration
+                        + ", reason=" + diagnosticReason
+        );
+        cancelScreenCompartmentRoute(cancellationReason);
+        if (!activityDestroyed && mBinding != null) {
+            mBinding.tvNavigate.setEnabled(true);
+            tip(userMessage);
+        }
+    }
+
     /**
      * 准备导航
-     * @param routeNodes
+     * @param newRouteNodes 路线快照
      */
     private void prepareNav(List<RouteNode> newRouteNodes) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -3887,6 +4062,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             handler.post(() -> cancelScreenCompartmentRoute(reason));
             return;
         }
+        cancelPendingScreenDeparture(reason);
         boolean deliveryRouteWasActive = screenCompartmentRouteActive;
         Runnable timeoutRunnable;
         synchronized (arrivalWaitLock) {
@@ -4178,7 +4354,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onEvent(int i) {
         Log.d("navigatenext","onEvent="+i);
     }
-    private boolean isCharging;
+    private volatile boolean isCharging;
     private int working;
 
     //充电回调
@@ -4198,10 +4374,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         @Override
         public void onChargerStatusChanged(int status) {
-            if (status==4&&webSocketService!=null){
+            long handoffGeneration = screenDepartureHandoffState.captureCurrentGeneration();
+            boolean chargerReleased = status == 1 || status == 6;
+            if (status==4){
                 isCharging=true;
-                webSocketService.send("开始充电");
-            }else if(status==1||status==6){
+                if (webSocketService != null) {
+                    webSocketService.send("开始充电");
+                }
+            }else if(chargerReleased){
                 isCharging=false;
                 upstreamChargeTaskActive = false;
             }
@@ -4211,17 +4391,35 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     "充电状态 status=" + status
                             + ", isCharging=" + isCharging
                             + ", upstreamChargeActive=" + upstreamChargeTaskActive
+                            + ", handoff=" + handoffGeneration
             );
+            if (chargerReleased
+                    && handoffGeneration != ScreenDepartureHandoffState.NO_GENERATION) {
+                handler.post(() -> continuePendingScreenDeparture(
+                        handoffGeneration,
+                        status
+                ));
+            }
         }
 
         @Override
         public void onError(int errorCode) {
+            long handoffGeneration = screenDepartureHandoffState.captureCurrentGeneration();
             upstreamChargeTaskActive = false;
             Log.d("Charger===", "errorCode = " + errorCode);
             DiagnosticLogRecorder.error(
                     "CHARGER",
                     "充电模块错误 code=" + errorCode
+                            + ", handoff=" + handoffGeneration
             );
+            if (handoffGeneration != ScreenDepartureHandoffState.NO_GENERATION) {
+                handler.post(() -> failPendingScreenDeparture(
+                        handoffGeneration,
+                        "charger error code=" + errorCode,
+                        "充电模块错误：" + errorCode,
+                        "充电控制异常，无法立即出发，请重试"
+                ));
+            }
         }
     };
 }

@@ -87,6 +87,26 @@ Screen route navigation contract:
 - If route preparation does not complete within ten seconds, invalidate the
   task, stop navigation, restore the departure action, and show a retry prompt.
 
+Screen departure charger handoff contract:
+
+- If charging control is already inactive, keep the direct screen-route
+  `prepareNav()` path.
+- If charging or an upstream charge task is active, immediately invalidate and
+  stop any previous SDK navigation before waiting for charger release.
+- Retain the screen route under a monotonically increasing handoff generation,
+  send `CHARGE_ACTION_STOP`, and do not prepare the route until charger status
+  `1` or `6` confirms release.
+- Charger status, error, and timeout work posted to the main thread must carry
+  the generation captured by the originating handoff. Work from a cancelled
+  generation cannot consume or fail a replacement route.
+- The first matching release consumes the retained route exactly once. Repeated
+  release callbacks cannot prepare the route again.
+- Charger absence, stop-action failure, charger error, or a ten-second release
+  timeout cancels the screen task, restores the departure action, and prompts a
+  retry without forcing navigation.
+- Task preemption and Activity teardown clear the retained route and timeout so
+  delayed callbacks cannot start navigation later.
+
 Upstream route preemption contract:
 
 - Parse and validate the complete `/robot_task/send_point` route before
@@ -111,6 +131,11 @@ Upstream route preemption contract:
 | Arrival HTTP call belongs to a cancelled wait generation | Cancel or skip the call |
 | Navigation callback carries a stale session generation | Ignore before reading or advancing route state |
 | Route preparation does not complete within ten seconds | Cancel the task, restore editing/departure controls, and prompt retry |
+| Screen departure begins while charger control is active | Stop prior navigation, request charger stop, and defer route preparation |
+| Charger status is neither `1` nor `6` during a pending handoff | Keep waiting without preparing navigation |
+| Matching charger release is reported more than once | Prepare the retained route exactly once |
+| Charger release/error callback belongs to a cancelled handoff generation | Ignore it without changing the replacement handoff |
+| Charger release is not confirmed within ten seconds | Cancel the screen task, restore departure, and prompt retry |
 | Activity is destroyed before queued endpoint work runs | Return without touching UI or SDK objects |
 | Incoming upstream route is invalid | Keep the current screen route and wait unchanged |
 
@@ -143,6 +168,11 @@ Static and build checks:
   complete a route position.
 - Assert route preparation timeout restores the departure action and cancels
   the active screen route.
+- Assert repeated charger release consumes one retained screen route once.
+- Assert a cancelled charger handoff generation cannot consume or clear its
+  replacement generation.
+- Assert charger release timeout and current-generation failure clear the
+  retained route without forcing navigation.
 - Assert malformed or null-containing upstream routes do not preempt a valid wait.
 - Run `:app:testDebugUnitTest` and `:app:assembleDebug`.
 
@@ -155,6 +185,10 @@ Robot integration checks:
 - Preempt an active wait with a valid upstream route and verify the old timeout,
   pickup completion, arrival call, and SDK callbacks cannot advance the new route.
 - Destroy and recreate the Activity and verify port `9088` binds to the new instance.
+- While charger status is `4`, start a screen route and verify the event order is
+  navigation stop, `CHARGE_ACTION_STOP`, status `6` or `1`, then route preparation.
+- Cancel one pending charger handoff, start another, and verify delayed callbacks
+  from the first handoff cannot start or cancel the second route.
 
 ### 7. Wrong vs Correct
 

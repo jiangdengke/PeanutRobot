@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"Preserve the existing screen-route session, preparation, cancellation, and stale-callback contracts while adding charger handoff."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Record charger handoff lifecycle events without weakening bounded non-blocking diagnostics."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace control flow across UI actions, charger callbacks, navigation preparation, timeout, and task preemption."}
