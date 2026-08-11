@@ -926,3 +926,20 @@
 - `progress.md`：追加本轮修正、验证证据、文件清单和回滚点。
 - 保留并未修改、还原、删除、格式化或暂存施工前已有的 `app/src/main/AndroidManifest.xml`、`app/src/main/java/com/yuandaima/peanutrobot/manager/NavManager.java`、`app/src/main/java/com/yuandaima/peanutrobot/util/MmkvUtils.java` 和根目录 JPG。
 - 完整回滚本次屏幕出发充电交接任务时，可执行 `git restore -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/compartment-point-binding.md progress.md .trellis/spec/backend/navigation-arrival-contract.md`，删除新增的 `ScreenDepartureHandoffState.java`、对应测试和 `.trellis/tasks/08-11-screen-departure-after-charge/`；不得处理上述保护文件。
+
+## 2026-08-11 - Task: 发布 v1.0.12-beta.18
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.18`，`versionCode` 单调递增为 `29`。
+- 准备通过 annotated tag `v1.0.12-beta.18` 触发 Android Release 工作流，发布回充后屏幕立即出发的 Charger 控制权交接修复。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；强制执行 42 个 Gradle 任务，完整单元测试和 Debug APK 构建通过。
+- 构建仅报告项目既有的 Android Gradle Plugin compileSdk、SDK XML、Manifest 重复权限、过时 API 和 unchecked 警告，本次版本更新未新增构建错误。
+- `git diff --check -- app/build.gradle`：通过。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.18`，`versionCode` 更新为 `29`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本修复回充控制仍活跃时屏幕路线过早准备的问题；导航进入运行后仍出现的 SDK 数字状态 `6` 不在本版本加入自动重试。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
+- 回滚点：功能提交 `d94c4ab`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert d94c4ab` 回退功能，不改写已推送历史。
