@@ -943,3 +943,23 @@
 - 本版本修复回充控制仍活跃时屏幕路线过早准备的问题；导航进入运行后仍出现的 SDK 数字状态 `6` 不在本版本加入自动重试。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异和根目录 JPG。
 - 回滚点：功能提交 `d94c4ab`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert d94c4ab` 回退功能，不改写已推送历史。
+
+## 2026-08-12 - Task: 暂时隐藏运行日志按钮
+### What was done
+- 将主界面右侧“运行日志”入口设为运行时不显示且不占布局空间，同时保留 Android Studio 设计预览中的可见性，方便后续恢复和调整。
+- 保留诊断日志后台采集、私有轮转存储、弹窗查看、复制、清空和文件导出全部实现；未改变导航、回充、仓库任务、到位等待、取餐、HTTP 或 WebSocket 行为。
+- 更新现场文档，明确当前默认隐藏入口，但内存快照和私有日志文件仍持续记录。
+
+### Testing
+- `./gradlew :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；Debug APK 构建通过，仅保留项目既有 Android Gradle Plugin compileSdk、SDK XML、过时 API 和 unchecked 警告。
+- `git diff --check -- app/src/main/res/layout/activity_main.xml docs/in-app-diagnostic-logs.md .trellis/tasks/08-12-hide-runtime-log-button`：通过。
+- IDE linter 检查 `activity_main.xml`：未报告诊断。
+- 未连接目标机器人；需在后续安装版本中确认右侧按钮重新分配空间，且业务操作按钮显示正常。
+
+### Notes
+- `app/src/main/res/layout/activity_main.xml`：将 `tv_diagnostic_logs` 设为运行时 `gone`，并用 `tools:visibility="visible"` 保留设计预览。
+- `docs/in-app-diagnostic-logs.md`：记录入口暂时隐藏及后台日志继续保留的现场行为。
+- `.trellis/tasks/08-12-hide-runtime-log-button/`：记录本轮范围、验收标准及实施/检查上下文。
+- `progress.md`：追加本轮实现、验证证据、文件清单和回滚点。
+- 保留并未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java`、根目录 JPG 和本次分析日志 TXT。
+- 回滚方式：执行 `git restore -- app/src/main/res/layout/activity_main.xml docs/in-app-diagnostic-logs.md progress.md`，并删除 `.trellis/tasks/08-12-hide-runtime-log-button/`；不得处理上述保护文件和现场日志。

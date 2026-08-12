@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify only the main-screen entry is hidden and all diagnostic behavior remains available in code."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Verify the change remains a reversible visibility adjustment without duplicate UI or logging logic."}

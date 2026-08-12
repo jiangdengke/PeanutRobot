@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Preserve diagnostic recording, persistence, and export behavior while hiding only the operator entry."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Keep the existing log dialog and export implementation intact instead of introducing a duplicate access path."}
