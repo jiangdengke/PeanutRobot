@@ -963,3 +963,20 @@
 - `progress.md`：追加本轮实现、验证证据、文件清单和回滚点。
 - 保留并未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java`、根目录 JPG 和本次分析日志 TXT。
 - 回滚方式：执行 `git restore -- app/src/main/res/layout/activity_main.xml docs/in-app-diagnostic-logs.md progress.md`，并删除 `.trellis/tasks/08-12-hide-runtime-log-button/`；不得处理上述保护文件和现场日志。
+
+## 2026-08-12 - Task: 发布 v1.0.12-beta.19
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.19`，`versionCode` 单调递增为 `30`。
+- 准备通过 annotated tag `v1.0.12-beta.19` 触发 Android Release 工作流，发布主界面暂时隐藏“运行日志”入口的调整。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；强制执行 42 个 Gradle 任务，完整单元测试和 Debug APK 构建通过。
+- 构建仅报告项目既有的 Android Gradle Plugin compileSdk、SDK XML、Manifest 重复权限、native library strip、过时 API 和 unchecked 警告，本次版本更新未新增构建错误。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.19`，`versionCode` 更新为 `30`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本只隐藏主界面日志入口；后台诊断日志、私有轮转文件和查看、复制、清空、导出实现均继续保留。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚点：功能提交 `26dec3d`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert 26dec3d` 恢复日志入口，不改写已推送历史。
