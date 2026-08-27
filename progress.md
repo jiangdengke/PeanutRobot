@@ -1005,3 +1005,20 @@
 - `.trellis/tasks/08-27-set-navigation-speed/`：记录需求、验收标准及实施/检查上下文。
 - 保留并未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `app/src/main/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfig.java`、`app/src/test/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfigTest.java`、`docs/navigation-speed.md` 和 `.trellis/tasks/08-27-set-navigation-speed/`；不得处理上述保护文件和现场文件。
+
+## 2026-08-27 - Task: 发布 v1.0.12-beta.20
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.20`，`versionCode` 单调递增为 `31`。
+- 准备通过 annotated tag `v1.0.12-beta.20` 触发 Android Release 工作流，发布默认速度 20 和主界面运行速度设置功能。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；强制执行 42 个 Gradle 任务，完整单元测试和 Debug APK 构建通过。
+- 构建仅报告项目既有的 Android Gradle Plugin compileSdk、SDK XML、Manifest 重复权限、native library strip、过时 API 和 unchecked 警告，本次版本更新未新增构建错误。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.20`，`versionCode` 更新为 `31`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本新增主界面运行速度查看和设置，默认速度为 `20`；保存后下一次出发生效，不需要重启机器人或 App。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚点：功能提交 `bd14f6b`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert bd14f6b` 回退运行速度功能，不改写已推送历史。
