@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify the configured value, displayed value, persisted value, and next-departure navigation value remain aligned."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that the implementation extends existing configuration and dialog patterns without duplicated speed sources."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify input validation, unit coverage, lint, and Gradle build checks for the speed setting."}

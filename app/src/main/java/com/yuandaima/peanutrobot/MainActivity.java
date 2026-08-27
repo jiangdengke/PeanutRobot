@@ -98,6 +98,7 @@ import com.yuandaima.peanutrobot.util.DiagnosticLogRecorder;
 import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
+import com.yuandaima.peanutrobot.util.NavigationSpeedConfig;
 import com.yuandaima.peanutrobot.util.TtsUntil;
 import com.yuandaima.peanutrobot.util.UpstreamChargeTaskParser;
 import com.yuandaima.peanutrobot.view.MapPointOverlayView;
@@ -133,7 +134,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         Navigation.Listener, NavManager.SessionNavigationListener {
     private String TAG="MainActivity===";
     private static final int ARRIVE_STAY_DURATION = 3000;
-    private static final int DEFAULT_NAVIGATION_SPEED = 30;
+    private static final String KEY_SINGLE_POINT_SPEED = "single_point_speed";
+    private static final String KEY_MULTIPLE_POINT_SPEED = "multiple_point_speed";
     private static final long IDLE_LOCK_DELAY_MS = 60 * 1000L;
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
@@ -713,6 +715,97 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         dialog.show();
     }
 
+    private void refreshNavigationSpeedButton() {
+        if (mBinding == null) {
+            return;
+        }
+        int singlePointSpeed = getStoredNavigationSpeed(KEY_SINGLE_POINT_SPEED);
+        int multiplePointSpeed = getStoredNavigationSpeed(KEY_MULTIPLE_POINT_SPEED);
+        if (singlePointSpeed == multiplePointSpeed) {
+            mBinding.tvNavigationSpeed.setText("运行速度：" + singlePointSpeed);
+        } else {
+            mBinding.tvNavigationSpeed.setText(
+                    "运行速度：" + singlePointSpeed + "/" + multiplePointSpeed
+            );
+        }
+    }
+
+    private int getStoredNavigationSpeed(String speedKey) {
+        return MmkvUtils.decodeInt(speedKey, NavigationSpeedConfig.DEFAULT_SPEED);
+    }
+
+    private void showNavigationSpeedDialog() {
+        int singlePointSpeed = getStoredNavigationSpeed(KEY_SINGLE_POINT_SPEED);
+        int multiplePointSpeed = getStoredNavigationSpeed(KEY_MULTIPLE_POINT_SPEED);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(24);
+        content.setPadding(padding, padding / 2, padding, 0);
+
+        TextView currentSpeedLabel = new TextView(this);
+        currentSpeedLabel.setText(
+                "当前速度：单点 " + singlePointSpeed + "，多点 " + multiplePointSpeed
+        );
+        currentSpeedLabel.setTextSize(16);
+        content.addView(currentSpeedLabel);
+
+        TextView speedRangeLabel = new TextView(this);
+        speedRangeLabel.setText("请输入统一运行速度（20-100）");
+        speedRangeLabel.setTextSize(16);
+        speedRangeLabel.setPadding(0, dp(12), 0, 0);
+        content.addView(speedRangeLabel);
+
+        EditText speedInput = new EditText(this);
+        speedInput.setSingleLine(true);
+        speedInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        speedInput.setHint("20-100");
+        speedInput.setText(singlePointSpeed == multiplePointSpeed
+                ? String.valueOf(singlePointSpeed)
+                : "");
+        speedInput.setSelectAllOnFocus(true);
+        content.addView(speedInput);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("运行速度")
+                .setView(content)
+                .setPositiveButton("保存", null)
+                .setNegativeButton("取消", null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String speedText = speedInput.getText().toString().trim();
+                    if (TextUtils.isEmpty(speedText)) {
+                        speedInput.setError("请输入速度");
+                        return;
+                    }
+
+                    int speed;
+                    try {
+                        speed = Integer.parseInt(speedText);
+                    } catch (NumberFormatException exception) {
+                        speedInput.setError("请输入整数");
+                        return;
+                    }
+
+                    if (!NavigationSpeedConfig.isSupportedSpeed(speed)) {
+                        speedInput.setError(
+                                "速度范围为 " + NavigationSpeedConfig.MIN_SPEED
+                                        + "-" + NavigationSpeedConfig.MAX_SPEED
+                        );
+                        return;
+                    }
+
+                    MmkvUtils.encode(KEY_SINGLE_POINT_SPEED, speed);
+                    MmkvUtils.encode(KEY_MULTIPLE_POINT_SPEED, speed);
+                    refreshNavigationSpeedButton();
+                    tip("运行速度已设置为 " + speed + "，下次出发生效");
+                    dialog.dismiss();
+                }));
+        dialog.show();
+    }
+
     private void openIdleImagePicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -1043,7 +1136,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         jsonObject = new JSONObject(text);
                                         int speed = jsonObject.optInt("speed",-1);
                                         if (speed!=-1){
-                                            MmkvUtils.encode("single_point_speed",speed);
+                                            MmkvUtils.encode(KEY_SINGLE_POINT_SPEED, speed);
+                                            runOnUiThread(() -> refreshNavigationSpeedButton());
                                         }
                                     } catch (JSONException e) {
                                         throw new RuntimeException(e);
@@ -1055,7 +1149,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         jsonObject = new JSONObject(text);
                                         int speed2 = jsonObject.optInt("speed",-1);
                                         if (speed2!=-1){
-                                            MmkvUtils.encode("multiple_point_speed",speed2);
+                                            MmkvUtils.encode(KEY_MULTIPLE_POINT_SPEED, speed2);
+                                            runOnUiThread(() -> refreshNavigationSpeedButton());
                                         }
                                     } catch (JSONException e) {
                                         throw new RuntimeException(e);
@@ -1200,6 +1295,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding.tvNavigate.setOnClickListener(this);
         mBinding.tvSecondaryScreenDisplay.setOnClickListener(this);
         mBinding.tvRefreshPoints.setOnClickListener(this);
+        mBinding.tvNavigationSpeed.setOnClickListener(this);
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
@@ -1242,6 +1338,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             replacePointData(mAdapter, displayData);
         }
         mAdapter.setSelectedPoints(getHighlightedPoints());
+        refreshNavigationSpeedButton();
         // mediaAdapter=new MediaAdapter(mediaModelList,MainActivity.this);
         //  mAdapter= new PointAdapter(testData);
         updateCompartmentUi();
@@ -2712,6 +2809,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 return;
             }
             refreshPointData(true);
+        } else if (id == mBinding.tvNavigationSpeed.getId()) {
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
+            showNavigationSpeedDialog();
         }else if (id==mBinding.tvGoCharge.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;
@@ -3486,9 +3588,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         peanutNavigation = navManager.getmPeanutNavigation();
         peanutNavigation.setTargets(new ArrayList<>(routeNodes));
 
-        int navigationSpeed = routeNodes.size()==1
-                ? MmkvUtils.decodeInt("single_point_speed", DEFAULT_NAVIGATION_SPEED)
-                : MmkvUtils.decodeInt("multiple_point_speed", DEFAULT_NAVIGATION_SPEED);
+        int navigationSpeed = routeNodes.size() == 1
+                ? getStoredNavigationSpeed(KEY_SINGLE_POINT_SPEED)
+                : getStoredNavigationSpeed(KEY_MULTIPLE_POINT_SPEED);
         navManager.setSpeed(navigationSpeed);
         DiagnosticLogRecorder.info(
                 "NAV",

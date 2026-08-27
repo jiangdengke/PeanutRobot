@@ -980,3 +980,28 @@
 - 本版本只隐藏主界面日志入口；后台诊断日志、私有轮转文件和查看、复制、清空、导出实现均继续保留。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚点：功能提交 `26dec3d`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert 26dec3d` 恢复日志入口，不改写已推送历史。
+
+## 2026-08-27 - Task: 增加运行速度设置
+### What was done
+- 将导航默认速度从 `30` 调整为 `20`，保留现有单点和多点速度配置键及上游接口兼容性。
+- 在主界面右侧增加“运行速度”按钮，显示当前单点/多点速度；点击后可输入 `20-100` 的统一速度并保存到 MMKV。
+- 保存速度后立即刷新界面显示；下一次导航准备路线时读取新配置并传给 Peanut SDK，不需要重启机器人或 App。
+- 明确当前导航中的路线不动态变速、不停止、不释放或重建导航实例；同步更新 README 和运行速度说明。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；完整单元测试和 Debug APK 构建通过。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfig.java app/src/main/res/layout/activity_main.xml app/src/test/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfigTest.java README.md docs/navigation-speed.md .trellis/tasks/08-27-set-navigation-speed`：通过。
+- IDE linter 检查本轮 Java、XML 和测试文件：未报告诊断。
+- `python3 ./.trellis/scripts/task.py validate 08-27-set-navigation-speed`：implement/check 上下文各 3 条，全部通过。
+- 未连接目标机器人；需在后续安装版本中确认按钮显示、弹窗输入和下一次出发的实际速度。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加运行速度按钮监听、当前速度显示、20-100 输入校验、MMKV 保存和下一次导航读取；上游速度接口更新后同步刷新显示。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfig.java`：集中定义默认速度、支持范围和范围校验。
+- `app/src/main/res/layout/activity_main.xml`：在右侧操作区增加“运行速度”按钮。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfigTest.java`：覆盖默认值、边界值和越界值校验。
+- `README.md`：更新默认速度和界面设置、生效时机说明。
+- `docs/navigation-speed.md`：新增运行速度设置、持久化、生效时机和上游接口说明。
+- `.trellis/tasks/08-27-set-navigation-speed/`：记录需求、验收标准及实施/检查上下文。
+- 保留并未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `app/src/main/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfig.java`、`app/src/test/java/com/yuandaima/peanutrobot/util/NavigationSpeedConfigTest.java`、`docs/navigation-speed.md` 和 `.trellis/tasks/08-27-set-navigation-speed/`；不得处理上述保护文件和现场文件。

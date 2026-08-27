@@ -499,6 +499,27 @@
                     android:textColor="@color/ui_text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_navigation_speed"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginStart="2dp"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginEnd="2dp"
+                    android:layout_marginBottom="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/text_view_selector"
+                    android:drawableStart="@drawable/ic_settings"
+                    android:drawableEnd="@drawable/ic_arrow_right"
+                    android:drawablePadding="8dp"
+                    android:gravity="center_vertical|start"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="运行速度：20"
+                    android:textColor="@color/ui_text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
             </androidx.appcompat.widget.LinearLayoutCompat>
 
             <androidx.appcompat.widget.LinearLayoutCompat
