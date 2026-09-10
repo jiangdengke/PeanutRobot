@@ -10,6 +10,7 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.yuandaima.peanutrobot.util.UpstreamServerConfig;
 
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -29,7 +30,6 @@ public class WebSocketService extends Service {
     private static final String TAG = "websocket=======";
 //    private static final String WS = "wss://echo.websocket.org";//测试地址
 //    private static final String WS = "ws://192.168.78.19:9096";
-    private static final String WS = "ws://192.168.112.194:9096";
     private static final String WS2 = "Ws://192.168.108.19:9094";
 
     private WebSocket webSocket;
@@ -78,10 +78,11 @@ public class WebSocketService extends Service {
     }
 
     private WebSocket connect() {
-        Log.d(TAG, "connect " + WS);
+        String statusReportWs = UpstreamServerConfig.getStatusReportWs();
+        Log.d(TAG, "connect " + statusReportWs);
       //  OkHttpClient client = new OkHttpClient.Builder().build();
         Request request = new Request.Builder()
-                .url(WS)
+                .url(statusReportWs)
                 .build();
 
         return client.newWebSocket(request, new WebSocketHandler("Server1"));
@@ -112,6 +113,16 @@ public class WebSocketService extends Service {
         if (webSocket==null){
             webSocket=connect();
         }
+    }
+
+    /**
+     * 上游地址修改后立即重连，使长连接切换到新地址。
+     */
+    public void reconnectNow() {
+        handler.removeCallbacksAndMessages(null);
+        connected = false;
+        close();
+        webSocket = connect();
     }
 
     private void reconnect() {

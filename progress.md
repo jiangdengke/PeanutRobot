@@ -1022,3 +1022,30 @@
 - 本版本新增主界面运行速度查看和设置，默认速度为 `20`；保存后下一次出发生效，不需要重启机器人或 App。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚点：功能提交 `bd14f6b`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert bd14f6b` 回退运行速度功能，不改写已推送历史。
+
+## 2026-09-10 - Task: 增加上游地址设置
+### What was done
+- 新增 `UpstreamServerConfig`，集中上游默认 IP、4 个固定端口、IPv4 校验和 URL 拼装，成为唯一的上游地址来源。
+- 在主界面右侧增加“上游地址”按钮，显示当前 IP；点击后可查看受影响端口、输入新 IPv4 并保存，另提供“恢复默认”。
+- 将到位上报 `9088`、配送语音 `9089`、仓库任务 `9098` 三处硬编码常量改为按需读取配置；`WebSocketService` 状态上报 `9096` 改为连接时读取配置。
+- 为 `WebSocketService` 增加 `reconnectNow()`，保存地址后主动断开并按新地址重连长连接，无需重启 App。
+- 调整右侧第一组按钮 `layout_weight` 从 `2` 到 `4`，与该组 4 个按钮匹配，避免挤压既有按钮。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；完整单元测试和 Debug APK 构建通过。
+- `UpstreamServerConfigTest`：`tests="7" skipped="0" failures="0" errors="0"`，覆盖合法地址、空白裁剪、空值、格式错误、段位越界和 4 个端点 URL 拼装。
+- IDE linter 检查本轮 Java、XML 和测试文件：未报告诊断。
+- `rg -n '192\.168\.112\.194' app/src/main`：仅剩配置类默认值、布局预览文本和未使用的 `MyMultiCameraFragment`/`MyMultiCameraFragment2` 遗留地址，4 个在用端点已无硬编码。
+- 未连接目标机器人；需在后续安装版本中确认按钮显示、弹窗校验、状态上报重连和 4 个端点的实际请求地址。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/util/UpstreamServerConfig.java`：新增上游地址读取、保存、恢复默认、IPv4 校验和 URL 拼装。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：删除 3 个硬编码地址常量，改为读取配置；新增“上游地址”按钮监听、设置弹窗、显示刷新和保存后重连。
+- `app/src/main/java/com/yuandaima/peanutrobot/server/WebSocketService.java`：状态上报地址改为读取配置，并新增 `reconnectNow()`。
+- `app/src/main/res/layout/activity_main.xml`：新增 `tv_upstream_server` 按钮并修正所在分组权重。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/UpstreamServerConfigTest.java`：新增 7 个纯 Java 校验和 URL 拼装测试。
+- `README.md`、`docs/upstream-server-settings.md`：说明可配置地址、受影响端口、校验规则和生效时机。
+- `.trellis/tasks/09-10-upstream-server-settings/`：记录需求、验收标准及实施/检查上下文。
+- 本轮不清理未使用 Fragment 的 `9090-9093`、`192.168.78.19`、`192.168.108.19` 和 `192.168.112.161` 遗留地址；这些代码当前无调用点。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/java/com/yuandaima/peanutrobot/server/WebSocketService.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `UpstreamServerConfig.java`、`UpstreamServerConfigTest.java`、`docs/upstream-server-settings.md` 和 `.trellis/tasks/09-10-upstream-server-settings/`；不得处理上述保护文件和现场文件。

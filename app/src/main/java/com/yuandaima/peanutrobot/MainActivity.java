@@ -101,6 +101,7 @@ import com.yuandaima.peanutrobot.util.MmkvUtils;
 import com.yuandaima.peanutrobot.util.NavigationSpeedConfig;
 import com.yuandaima.peanutrobot.util.TtsUntil;
 import com.yuandaima.peanutrobot.util.UpstreamChargeTaskParser;
+import com.yuandaima.peanutrobot.util.UpstreamServerConfig;
 import com.yuandaima.peanutrobot.view.MapPointOverlayView;
 
 import org.json.JSONException;
@@ -151,12 +152,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final String DELIVERY_STATUS_PICKED_UP = "已完成取餐";
     private static final String DELIVERY_STATUS_TIMED_OUT = "等待超时";
     private static final String DELIVERY_STATUS_CANCELLED = "配送已取消";
-    private static final String NAV_ARRIVE_URL = "http://192.168.112.194:9088/nav_arrive";
     private static final okhttp3.MediaType JSON_MEDIA_TYPE =
             okhttp3.MediaType.get("application/json; charset=utf-8");
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
     private static final int REQUEST_DIAGNOSTIC_LOG_EXPORT_PERMISSION = 2002;
-    private static final String WAREHOUSE_TASK_WS = "ws://192.168.112.194:9098";
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
     private static final int GO_CHARGE_TASK_ID = 789115;
     private static final int PATROL_WAREHOUSE_TASK_ID = 789110;
@@ -167,7 +166,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final long WAREHOUSE_TASK_RESPONSE_TIMEOUT_MS = 15000L;
     private static final long STARTUP_GO_CHARGE_DELAY_MS = 5000L;
     private static final long WAREHOUSE_TASK_STATUS_CLEAR_DELAY_MS = 5000L;
-    private static final String DEFAULT_DELIVERY_VOICE_URL = "http://192.168.112.194:9089/delivery.wav";
     private static final String KEY_IDLE_IMAGE_URI = "idle_screen_image_uri";
     private static final String KEY_IDLE_IMAGE_ROTATION = "idle_screen_image_rotation";
     private static final String KEY_IDLE_IMAGE_MODE = "idle_screen_image_mode";
@@ -806,6 +804,95 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         dialog.show();
     }
 
+    private void refreshUpstreamServerButton() {
+        if (mBinding == null) {
+            return;
+        }
+        mBinding.tvUpstreamServer.setText("上游地址：" + UpstreamServerConfig.getHost());
+    }
+
+    private void showUpstreamServerDialog() {
+        String currentHost = UpstreamServerConfig.getHost();
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(24);
+        content.setPadding(padding, padding / 2, padding, 0);
+
+        TextView currentHostLabel = new TextView(this);
+        currentHostLabel.setText("当前地址：" + currentHost);
+        currentHostLabel.setTextSize(16);
+        content.addView(currentHostLabel);
+
+        TextView affectedLabel = new TextView(this);
+        affectedLabel.setText("影响到位上报 9088、配送语音 9089、状态上报 9096、仓库任务 9098");
+        affectedLabel.setTextSize(13);
+        affectedLabel.setPadding(0, dp(8), 0, 0);
+        content.addView(affectedLabel);
+
+        TextView hostHintLabel = new TextView(this);
+        hostHintLabel.setText("请输入上游服务器 IP");
+        hostHintLabel.setTextSize(16);
+        hostHintLabel.setPadding(0, dp(12), 0, 0);
+        content.addView(hostHintLabel);
+
+        EditText hostInput = new EditText(this);
+        hostInput.setSingleLine(true);
+        hostInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        hostInput.setHint(UpstreamServerConfig.DEFAULT_HOST);
+        hostInput.setText(currentHost);
+        content.addView(hostInput);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("上游地址")
+                .setView(content)
+                .setPositiveButton("保存", null)
+                .setNeutralButton("恢复默认", null)
+                .setNegativeButton("取消", null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String hostText = hostInput.getText().toString().trim();
+                if (TextUtils.isEmpty(hostText)) {
+                    hostInput.setError("请输入 IP 地址");
+                    return;
+                }
+                if (!UpstreamServerConfig.isValidHost(hostText)) {
+                    hostInput.setError("请输入正确的 IPv4 地址");
+                    return;
+                }
+                if (!UpstreamServerConfig.saveHost(hostText)) {
+                    hostInput.setError("保存失败，请重新输入");
+                    return;
+                }
+                applyUpstreamServerChange();
+                dialog.dismiss();
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                UpstreamServerConfig.resetHost();
+                hostInput.setText(UpstreamServerConfig.DEFAULT_HOST);
+                applyUpstreamServerChange();
+                dialog.dismiss();
+            });
+        });
+        dialog.show();
+    }
+
+    private void applyUpstreamServerChange() {
+        String host = UpstreamServerConfig.getHost();
+        refreshUpstreamServerButton();
+        DiagnosticLogRecorder.info("CONFIG", "上游地址已更新 host=" + host);
+        if (webSocketService != null) {
+            webSocketService.reconnectNow();
+            DiagnosticLogRecorder.info(
+                    "CONFIG",
+                    "状态上报 WebSocket 重连 endpoint=" + UpstreamServerConfig.getStatusReportWs()
+            );
+        }
+        tip("上游地址已设置为 " + host);
+    }
+
     private void openIdleImagePicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -1296,6 +1383,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding.tvSecondaryScreenDisplay.setOnClickListener(this);
         mBinding.tvRefreshPoints.setOnClickListener(this);
         mBinding.tvNavigationSpeed.setOnClickListener(this);
+        mBinding.tvUpstreamServer.setOnClickListener(this);
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
@@ -1339,6 +1427,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         mAdapter.setSelectedPoints(getHighlightedPoints());
         refreshNavigationSpeedButton();
+        refreshUpstreamServerButton();
         // mediaAdapter=new MediaAdapter(mediaModelList,MainActivity.this);
         //  mAdapter= new PointAdapter(testData);
         updateCompartmentUi();
@@ -2814,6 +2903,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 return;
             }
             showNavigationSpeedDialog();
+        } else if (id == mBinding.tvUpstreamServer.getId()) {
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
+            showUpstreamServerDialog();
         }else if (id==mBinding.tvGoCharge.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;
@@ -3122,13 +3216,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
 
         beginWarehouseTaskLoading(taskName);
-        Log.d(TAG, taskName + "指令发送到 " + WAREHOUSE_TASK_WS + ": " + payload);
+        String warehouseTaskWs = UpstreamServerConfig.getWarehouseTaskWs();
+        Log.d(TAG, taskName + "指令发送到 " + warehouseTaskWs + ": " + payload);
         DiagnosticLogRecorder.info(
                 "WAREHOUSE",
-                "发送任务 name=" + taskName + ", endpoint=" + WAREHOUSE_TASK_WS
+                "发送任务 name=" + taskName + ", endpoint=" + warehouseTaskWs
         );
         Request request = new Request.Builder()
-                .url(WAREHOUSE_TASK_WS)
+                .url(warehouseTaskWs)
                 .build();
 
         warehouseTaskWebSocketClient.newWebSocket(request, new WebSocketListener() {
@@ -3943,8 +4038,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         handler.post(deliveryCountdownRunnable);
 
         if (routeNodes.size() == 1) {
-            Log.d("navigatenext","delivery_voice_address="+DEFAULT_DELIVERY_VOICE_URL);
-            mediaPlayerShow(DEFAULT_DELIVERY_VOICE_URL);
+            String deliveryVoiceUrl = UpstreamServerConfig.getDeliveryVoiceUrl();
+            Log.d("navigatenext","delivery_voice_address="+deliveryVoiceUrl);
+            mediaPlayerShow(deliveryVoiceUrl);
         }
 
         sendArrivalReport(currentNode, bay, waitGeneration);
@@ -4072,7 +4168,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             payload.put("bay", bay);
             RequestBody requestBody = RequestBody.create(payload.toString(), JSON_MEDIA_TYPE);
             Request request = new Request.Builder()
-                    .url(NAV_ARRIVE_URL)
+                    .url(UpstreamServerConfig.getNavArriveUrl())
                     .post(requestBody)
                     .build();
 
