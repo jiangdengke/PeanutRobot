@@ -1049,3 +1049,19 @@
 - 本轮不清理未使用 Fragment 的 `9090-9093`、`192.168.78.19`、`192.168.108.19` 和 `192.168.112.161` 遗留地址；这些代码当前无调用点。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/java/com/yuandaima/peanutrobot/server/WebSocketService.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `UpstreamServerConfig.java`、`UpstreamServerConfigTest.java`、`docs/upstream-server-settings.md` 和 `.trellis/tasks/09-10-upstream-server-settings/`；不得处理上述保护文件和现场文件。
+
+## 2026-09-10 - Task: 发布 v1.0.12-beta.21
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.21`，`versionCode` 单调递增为 `32`。
+- 准备通过 annotated tag `v1.0.12-beta.21` 触发 Android Release 工作流，发布主界面上游地址设置功能。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；强制执行完整单元测试和 Debug APK 构建。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.21`，`versionCode` 更新为 `32`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本新增主界面上游地址查看和修改，默认地址为 `192.168.112.194`；保存后 4 个上游端点立即生效，状态上报长连接主动重连，不需要重启机器人或 App。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚点：功能提交 `85a0d7f`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert 85a0d7f` 回退上游地址设置功能，不改写已推送历史。
