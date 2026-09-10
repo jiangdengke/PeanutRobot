@@ -1092,3 +1092,20 @@
 - 安全取舍：设置入口密码 `0` 的防护强度低于原先地图编辑所用的 `123456`，地图点位改错会影响导航落点；本轮按现场易操作优先，已与使用方确认。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `SettingsAccessConfig.java`、`SettingsAccessConfigTest.java`、`docs/settings-entry.md` 和 `.trellis/tasks/09-10-unified-settings-entry/`；不得处理上述保护文件和现场文件。
+
+## 2026-09-10 - Task: 发布 v1.0.12-beta.22
+### What was done
+- 将 Android 应用版本更新为 `1.0.12-beta.22`，`versionCode` 单调递增为 `33`。
+- 准备通过 annotated tag `v1.0.12-beta.22` 触发 Android Release 工作流，发布主界面统一设置入口。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；强制执行 42 个 Gradle 任务，完整单元测试和 Debug APK 构建通过。
+- 12 个测试套件共 44 个用例全部通过，`failures="0" errors="0"`。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+
+### Notes
+- `app/build.gradle`：更新应用版本为 `1.0.12-beta.22`，`versionCode` 更新为 `33`。
+- `progress.md`：追加本次预发布准备、验证证据和回滚点。
+- 本版本新增主界面“设置”入口，固定密码 `0`；集中上游地址、运行速度、修改进入密码、编辑地图、锁屏设置和运行日志 6 项。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚点：功能提交 `9eef1db`，去重提交 `f2c0cc4`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert f2c0cc4 9eef1db` 回退设置入口，不改写已推送历史。
