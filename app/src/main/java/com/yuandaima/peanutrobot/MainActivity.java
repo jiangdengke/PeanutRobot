@@ -99,6 +99,7 @@ import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
 import com.yuandaima.peanutrobot.util.NavigationSpeedConfig;
+import com.yuandaima.peanutrobot.util.SettingsAccessConfig;
 import com.yuandaima.peanutrobot.util.TtsUntil;
 import com.yuandaima.peanutrobot.util.UpstreamChargeTaskParser;
 import com.yuandaima.peanutrobot.util.UpstreamServerConfig;
@@ -660,18 +661,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         content.addView(modeGroup);
 
-        TextView passwordLabel = new TextView(this);
-        passwordLabel.setText("修改进入密码");
-        passwordLabel.setTextSize(16);
-        passwordLabel.setPadding(0, dp(12), 0, 0);
-        content.addView(passwordLabel);
-
-        EditText passwordInput = new EditText(this);
-        passwordInput.setSingleLine(true);
-        passwordInput.setHint("留空则不修改");
-        passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        content.addView(passwordInput);
-
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("屏保设置")
                 .setView(content)
@@ -698,11 +687,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 MmkvUtils.encode(KEY_IDLE_IMAGE_MODE, IDLE_IMAGE_MODE_FIT);
             }
 
-            String newPassword = passwordInput.getText().toString();
-            if (!TextUtils.isEmpty(newPassword)) {
-                MmkvUtils.encode(KEY_IDLE_LOCK_PASSWORD, newPassword);
-            }
-
             applyIdleScreenConfig();
             dialog.dismiss();
         }));
@@ -710,6 +694,147 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             idleConfigDialogShowing = false;
             resetIdleLockTimer();
         });
+        dialog.show();
+    }
+
+    private void showSettingsPasswordDialog() {
+        EditText passwordInput = new EditText(this);
+        passwordInput.setSingleLine(true);
+        passwordInput.setHint("请输入密码");
+        passwordInput.setInputType(
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
+        int padding = dp(24);
+        passwordInput.setPadding(padding, padding / 2, padding, padding / 2);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("设置验证")
+                .setView(passwordInput)
+                .setPositiveButton("进入", null)
+                .setNegativeButton("取消", null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (!SettingsAccessConfig.isValidPassword(
+                            passwordInput.getText().toString())) {
+                        passwordInput.setError("密码错误");
+                        passwordInput.selectAll();
+                        return;
+                    }
+                    dialog.dismiss();
+                    showSettingsDialog();
+                }));
+        dialog.show();
+    }
+
+    private void showSettingsDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(16);
+        content.setPadding(padding, padding / 2, padding, 0);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("设置")
+                .setView(content)
+                .setNegativeButton("关闭", null)
+                .create();
+
+        addSettingsEntry(content, "上游地址：" + UpstreamServerConfig.getHost(), () -> {
+            dialog.dismiss();
+            showUpstreamServerDialog();
+        });
+        addSettingsEntry(content, "运行速度：" + describeNavigationSpeed(), () -> {
+            dialog.dismiss();
+            showNavigationSpeedDialog();
+        });
+        addSettingsEntry(content, "修改进入密码", () -> {
+            dialog.dismiss();
+            showIdleLockPasswordDialog();
+        });
+        addSettingsEntry(content, "编辑地图", () -> {
+            dialog.dismiss();
+            requestMapEditEntryWithoutPassword();
+        });
+        addSettingsEntry(content, "锁屏设置", () -> {
+            dialog.dismiss();
+            showIdleScreenSettingsDialog();
+        });
+        addSettingsEntry(content, "运行日志", () -> {
+            dialog.dismiss();
+            showDiagnosticLogDialog();
+        });
+
+        dialog.show();
+    }
+
+    private void addSettingsEntry(LinearLayout container, String title, Runnable action) {
+        TextView entry = new TextView(this);
+        entry.setText(title);
+        entry.setTextSize(16);
+        entry.setTextColor(ContextCompat.getColor(this, R.color.ui_text_primary));
+        entry.setBackgroundResource(R.drawable.text_view_selector);
+        entry.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        int horizontalPadding = dp(12);
+        int verticalPadding = dp(14);
+        entry.setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.topMargin = dp(4);
+        params.bottomMargin = dp(4);
+        entry.setLayoutParams(params);
+        entry.setOnClickListener(v -> action.run());
+        container.addView(entry);
+    }
+
+    private String describeNavigationSpeed() {
+        int singlePointSpeed = getStoredNavigationSpeed(KEY_SINGLE_POINT_SPEED);
+        int multiplePointSpeed = getStoredNavigationSpeed(KEY_MULTIPLE_POINT_SPEED);
+        return singlePointSpeed == multiplePointSpeed
+                ? String.valueOf(singlePointSpeed)
+                : singlePointSpeed + "/" + multiplePointSpeed;
+    }
+
+    private void showIdleLockPasswordDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(24);
+        content.setPadding(padding, padding / 2, padding, 0);
+
+        TextView hintLabel = new TextView(this);
+        hintLabel.setText("该密码用于锁屏解锁和长按地图进入编辑");
+        hintLabel.setTextSize(13);
+        content.addView(hintLabel);
+
+        EditText passwordInput = new EditText(this);
+        passwordInput.setSingleLine(true);
+        passwordInput.setHint("留空则不修改");
+        passwordInput.setInputType(
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
+        passwordInput.setPadding(0, dp(12), 0, 0);
+        content.addView(passwordInput);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("修改进入密码")
+                .setView(content)
+                .setPositiveButton("保存", null)
+                .setNegativeButton("取消", null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String newPassword = passwordInput.getText().toString();
+                    if (TextUtils.isEmpty(newPassword)) {
+                        dialog.dismiss();
+                        return;
+                    }
+                    MmkvUtils.encode(KEY_IDLE_LOCK_PASSWORD, newPassword);
+                    tip("进入密码已修改");
+                    dialog.dismiss();
+                }));
         dialog.show();
     }
 
@@ -1384,6 +1509,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mBinding.tvRefreshPoints.setOnClickListener(this);
         mBinding.tvNavigationSpeed.setOnClickListener(this);
         mBinding.tvUpstreamServer.setOnClickListener(this);
+        mBinding.tvSettings.setOnClickListener(this);
         mBinding.tvGoCharge.setOnClickListener(this);
         mBinding.tvPatrolWarehouse.setOnClickListener(this);
         mBinding.tvRecall.setOnClickListener(this);
@@ -2203,6 +2329,21 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         showMapEditPasswordDialog();
     }
 
+    /**
+     * 从设置入口进入地图编辑。设置入口已验证过密码，这里不再二次验证，
+     * 但仍保留机器人任务进行中禁止编辑的限制。
+     */
+    private void requestMapEditEntryWithoutPassword() {
+        if (mapEditMode || mapEditPasswordDialogShowing) {
+            return;
+        }
+        if (isRobotTaskBusyForMapEditing()) {
+            tip("机器人任务进行中，禁止编辑地图");
+            return;
+        }
+        enterMapEditMode();
+    }
+
     private void showMapEditPasswordDialog() {
         EditText passwordInput = new EditText(this);
         passwordInput.setSingleLine(true);
@@ -2908,6 +3049,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 return;
             }
             showUpstreamServerDialog();
+        } else if (id == mBinding.tvSettings.getId()) {
+            if (blockRobotTaskActionWhileMapEditing()) {
+                return;
+            }
+            showSettingsPasswordDialog();
         }else if (id==mBinding.tvGoCharge.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;

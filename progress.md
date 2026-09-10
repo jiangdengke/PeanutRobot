@@ -1065,3 +1065,30 @@
 - 本版本新增主界面上游地址查看和修改，默认地址为 `192.168.112.194`；保存后 4 个上游端点立即生效，状态上报长连接主动重连，不需要重启机器人或 App。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚点：功能提交 `85a0d7f`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert 85a0d7f` 回退上游地址设置功能，不改写已推送历史。
+
+## 2026-09-10 - Task: 增加统一设置入口
+### What was done
+- 主界面右侧新增“设置”按钮，进入前需输入固定密码 `0`；密码由新增的 `SettingsAccessConfig` 校验，不可在界面修改。
+- 设置弹窗集中 6 项：上游地址、运行速度、修改进入密码、编辑地图、锁屏设置、运行日志；上游地址和运行速度在列表中直接显示当前值。
+- 将“修改进入密码”从锁屏设置弹窗中独立成设置项，锁屏设置仅保留屏保图片、旋转角度和显示模式。
+- 新增 `requestMapEditEntryWithoutPassword()`，从设置进入地图编辑不再二次验证密码，但保留机器人任务进行中禁止编辑的限制。
+- 右侧原有“上游地址”“运行速度”“锁屏设置”按钮改为 `visibility="gone"` 并保留 `id` 和 `tools:visibility`，沿用运行日志入口的处理方式；同步修正两个分组的 `layout_weight` 为实际可见按钮数 `2` 和 `3`。
+- 保留长按地图进入编辑的原有路径及其锁屏密码验证，未改变现场既有习惯。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；完整单元测试和 Debug APK 构建通过。
+- 12 个测试套件共 44 个用例全部通过，`failures="0" errors="0"`；其中 `SettingsAccessConfigTest` 为 4 个用例。
+- `SettingsAccessConfigTest`：覆盖固定密码 `0`、空白裁剪、空值/空白拒绝，以及 `00`、`1`、`123456`、`o` 等错误密码拒绝。
+- IDE linter 检查本轮 Java、XML 和测试文件：未报告诊断。
+- 未连接目标机器人；需在后续安装版本中确认设置按钮显示、密码校验、6 项跳转、地图编辑免密进入和任务进行中的拒绝提示。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/util/SettingsAccessConfig.java`：新增设置入口固定密码常量和校验。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：新增设置按钮监听、密码弹窗、设置列表、条目构建、进入密码弹窗和地图编辑免密路径；移除锁屏设置弹窗内的密码输入与保存分支。
+- `app/src/main/res/layout/activity_main.xml`：新增 `tv_settings` 按钮，收起 3 个按钮并修正分组权重。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/SettingsAccessConfigTest.java`：新增 4 个纯 Java 密码校验测试。
+- `README.md`、`docs/settings-entry.md`：说明设置入口位置、固定密码 `0`、包含项、两个密码的区别和地图编辑的两条路径。
+- `.trellis/tasks/09-10-unified-settings-entry/`：记录需求、验收标准及实施/检查上下文。
+- 安全取舍：设置入口密码 `0` 的防护强度低于原先地图编辑所用的 `123456`，地图点位改错会影响导航落点；本轮按现场易操作优先，已与使用方确认。
+- 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
+- 回滚方式：执行 `git restore -- README.md app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml progress.md`，删除新增的 `SettingsAccessConfig.java`、`SettingsAccessConfigTest.java`、`docs/settings-entry.md` 和 `.trellis/tasks/09-10-unified-settings-entry/`；不得处理上述保护文件和现场文件。
