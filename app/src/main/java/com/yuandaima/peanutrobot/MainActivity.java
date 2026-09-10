@@ -842,15 +842,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (mBinding == null) {
             return;
         }
-        int singlePointSpeed = getStoredNavigationSpeed(KEY_SINGLE_POINT_SPEED);
-        int multiplePointSpeed = getStoredNavigationSpeed(KEY_MULTIPLE_POINT_SPEED);
-        if (singlePointSpeed == multiplePointSpeed) {
-            mBinding.tvNavigationSpeed.setText("运行速度：" + singlePointSpeed);
-        } else {
-            mBinding.tvNavigationSpeed.setText(
-                    "运行速度：" + singlePointSpeed + "/" + multiplePointSpeed
-            );
-        }
+        mBinding.tvNavigationSpeed.setText("运行速度：" + describeNavigationSpeed());
     }
 
     private int getStoredNavigationSpeed(String speedKey) {
