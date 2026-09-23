@@ -1109,3 +1109,23 @@
 - 本版本新增主界面“设置”入口，固定密码 `0`；集中上游地址、运行速度、修改进入密码、编辑地图、锁屏设置和运行日志 6 项。
 - 未修改、还原、删除或暂存施工前已有的 `AndroidManifest.xml`、`MyApplication.java`、`NavManager.java`、`MmkvUtils.java` 行尾差异、根目录 JPG 和现场日志 TXT。
 - 回滚点：功能提交 `9eef1db`，去重提交 `f2c0cc4`；发布提交完成后使用 `git revert <release-commit>` 回退版本号，使用 `git revert f2c0cc4 9eef1db` 回退设置入口，不改写已推送历史。
+
+## 2026-09-23 - Task: 巡仓到点一分钟无下一路线时返回出餐口
+### What was done
+- 仅对主界面发起的巡仓启用到点等待：上游下发的当前路线到末点后，保持原有完成上报，等待下一条有效路线最多 60 秒；到点已是出餐口 ID 2 时不返程。
+- 收到下一条有效路线会取消计时；超时则复用本地 PeanutNavigation 导航到出餐口 ID 2，不依赖上游的召回请求。停止、回充、手动操作、导航失败及页面销毁会取消旧计时器，等待期间不允许地图编辑。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；现有单元测试及 Debug APK 构建通过。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/room-map-preview.md`：通过；IDE ReadLints 未报告本次 Java 文件诊断。
+- 未连接目标机器人，未验证巡仓到点后 60 秒返程的现场行为；需现场验证收到下一点、断连后无下一点、任务停止/抢占及返程 SDK 回调。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：增加巡仓来源标记、到点计时、本地 ID 2 返程及抢占时取消等待。
+- `docs/patrol-timeout-return.md`：记录巡仓返程条件、上游协议局限和现场验收步骤。
+- `docs/room-map-preview.md`：补充巡仓等待期间的地图编辑互斥。
+- `.trellis/tasks/09-23-patrol-point-timeout-return/prd.md`：记录目标、作用范围、验收条件和已知协议限制。
+- `.trellis/tasks/09-23-patrol-point-timeout-return/task.json`、`implement.jsonl`、`check.jsonl`：记录 Trellis 任务元数据与上下文。
+- `progress.md`：追加本轮实施、验证和回滚信息。
+- 上游 `send_point` 没有巡仓任务 ID；巡仓来源由本机按钮标记，在该标记有效时收到的有效上游路线均视为下一条巡仓路线。超时按“未收到下一点”判断，不等同于已证明上游网络断连；返程指令是否让真机实际移动须现场确认。
+- 回滚方式：对上述本轮新增/修改的仓库文件，使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/room-map-preview.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `docs/patrol-timeout-return.md` 和 `.trellis/tasks/09-23-patrol-point-timeout-return/`。不得处理原有未提交的换行差异或现场 JPG/TXT 文件。

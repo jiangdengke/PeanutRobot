@@ -160,6 +160,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
     private static final int GO_CHARGE_TASK_ID = 789115;
     private static final int PATROL_WAREHOUSE_TASK_ID = 789110;
+    private static final int PATROL_RETURN_POINT_ID = 2;
+    private static final long PATROL_NEXT_ROUTE_TIMEOUT_MS = 60 * 1000L;
     private static final int RECALL_TASK_ID = 789116;
     private static final String GO_CHARGE_ROBOT_TASK_ID = "0000004529";
     private static final String PATROL_WAREHOUSE_ROBOT_TASK_ID = "0000004528";
@@ -225,6 +227,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private boolean warehouseTaskPending = false;
     private volatile boolean upstreamChargeTaskActive = false;
     private boolean startupGoChargeSent = false;
+    private boolean patrolFallbackEnabled = false;
+    private Runnable patrolReturnTimeoutRunnable;
     private String pendingWarehouseTaskName = "";
     private WebSocket pendingWarehouseTaskWebSocket;
     private int warehouseTaskLoadingStep = 0;
@@ -1233,6 +1237,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                                 "CHARGER",
                                                 "执行上游回充任务 pile=" + upstreamPileId
                                         );
+                                        stopPatrolFallback("上游回充任务");
                                         upstreamChargeTaskActive = true;
                                         discardMapEditingForPreemptingTask("HTTP 回充任务");
                                         cancelScreenCompartmentRoute("HTTP 回充任务");
@@ -1287,6 +1292,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         if (activityDestroyed) {
                                             return;
                                         }
+                                        cancelPatrolReturnWait("收到上游下一条路线");
                                         upstreamChargeTaskActive = false;
                                         discardMapEditingForPreemptingTask("上游 send_point 任务");
                                         cancelScreenCompartmentRoute("上游 send_point 抢占");
@@ -1315,6 +1321,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                         if (activityDestroyed) {
                                             return;
                                         }
+                                        stopPatrolFallback("上游停止任务");
                                         cancelScreenCompartmentRoute("上游停止任务");
                                         DiagnosticLogRecorder.info(
                                                 "NAV",
@@ -2742,6 +2749,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private boolean isRobotTaskBusyForMapEditing() {
         return screenCompartmentRouteActive
                 || navigationTaskActive
+                || patrolReturnTimeoutRunnable != null
                 || warehouseTaskPending
                 || upstreamChargeTaskActive;
     }
@@ -2864,6 +2872,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onDestroy() {
         DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onDestroy start");
+        stopPatrolFallback("Activity 销毁");
         cancelScreenCompartmentRoute("Activity 销毁");
         activityDestroyed = true;
         pendingDiagnosticLogExportSnapshot = null;
@@ -2996,6 +3005,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 tip("请先绑定点位到仓位");
                 return;
             }
+            stopPatrolFallback("手动送餐");
             routeNodes = new ArrayList<>();
 
             for (DestModel.DataBean dataBean : selectedPointList) {
@@ -3050,6 +3060,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;
             }
+            stopPatrolFallback("手动回充");
             cancelScreenCompartmentRoute("手动回充");
             mBinding.tvNavigate.setEnabled(true);
             DiagnosticLogRecorder.info("WAREHOUSE", "用户点击回充");
@@ -3057,6 +3068,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }else if (id==mBinding.tvPatrolWarehouse.getId()){
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;
+            }
+            if (!warehouseTaskPending) {
+                stopPatrolFallback("重新发起巡仓");
+                patrolFallbackEnabled = true;
             }
             cancelScreenCompartmentRoute("手动巡仓");
             mBinding.tvNavigate.setEnabled(true);
@@ -3066,6 +3081,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             if (blockRobotTaskActionWhileMapEditing()) {
                 return;
             }
+            stopPatrolFallback("手动召回");
             cancelScreenCompartmentRoute("手动召回");
             mBinding.tvNavigate.setEnabled(true);
             DiagnosticLogRecorder.info("WAREHOUSE", "用户点击召回");
@@ -3526,6 +3542,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     return;
                 }
                 finishWarehouseTaskUi(taskName);
+                if ("巡仓".equals(taskName)
+                        && !navigationTaskActive
+                        && patrolReturnTimeoutRunnable == null) {
+                    stopPatrolFallback("巡仓请求失败");
+                }
                 String displayMessage = taskName + "失败：" + message;
                 mBinding.tvWarehouseTaskStatus.setText(displayMessage);
                 mBinding.tvWarehouseTaskStatus.setTextColor(Color.RED);
@@ -3599,6 +3620,46 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         warehouseTaskWebSocketClient.dispatcher().cancelAll();
         warehouseTaskWebSocketClient.dispatcher().executorService().shutdown();
         warehouseTaskWebSocketClient.connectionPool().evictAll();
+    }
+
+    private void cancelPatrolReturnWait(String reason) {
+        if (patrolReturnTimeoutRunnable == null) {
+            return;
+        }
+        handler.removeCallbacks(patrolReturnTimeoutRunnable);
+        patrolReturnTimeoutRunnable = null;
+        DiagnosticLogRecorder.info("WAREHOUSE", "取消巡仓到点等待 reason=" + reason);
+    }
+
+    private void stopPatrolFallback(String reason) {
+        cancelPatrolReturnWait(reason);
+        patrolFallbackEnabled = false;
+    }
+
+    private void startPatrolReturnWait(int arrivedPointId) {
+        cancelPatrolReturnWait("更新巡仓到点等待");
+        DiagnosticLogRecorder.info(
+                "WAREHOUSE",
+                "巡仓到点等待下一条路线 pointId=" + arrivedPointId
+                        + ", timeoutMs=" + PATROL_NEXT_ROUTE_TIMEOUT_MS
+        );
+        patrolReturnTimeoutRunnable = () -> {
+            patrolReturnTimeoutRunnable = null;
+            if (activityDestroyed || !patrolFallbackEnabled || navigationTaskActive) {
+                return;
+            }
+            patrolFallbackEnabled = false;
+            DiagnosticLogRecorder.warn(
+                    "WAREHOUSE",
+                    "巡仓超时未收到下一条路线，本地返回出餐口 pointId=" + PATROL_RETURN_POINT_ID
+            );
+            RouteNode returnPoint = new RouteNode();
+            returnPoint.setId(PATROL_RETURN_POINT_ID);
+            returnPoint.setName("出餐口");
+            flag = "";
+            prepareNav(Arrays.asList(returnPoint));
+        };
+        handler.postDelayed(patrolReturnTimeoutRunnable, PATROL_NEXT_ROUTE_TIMEOUT_MS);
     }
 
     private void startScreenDeparture(List<RouteNode> selectedRouteNodes) {
@@ -3870,6 +3931,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 "NAV",
                 "路线准备超时 task=" + taskGeneration + ", session=" + sessionGeneration
         );
+        stopPatrolFallback("导航路线准备超时");
         if (screenCompartmentRouteActive) {
             cancelScreenCompartmentRoute("导航路线准备超时");
         } else {
@@ -4467,6 +4529,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                         flag="";
                     }
                     invalidateNavigationTask("upstream route completed");
+                    if (patrolFallbackEnabled && "send_point".equals(completedTaskFlag)) {
+                        int arrivedPointId = routeNodes.get(routeNodes.size() - 1).getId();
+                        if (arrivedPointId == PATROL_RETURN_POINT_ID) {
+                            stopPatrolFallback("巡仓已到出餐口");
+                        } else {
+                            startPatrolReturnWait(arrivedPointId);
+                        }
+                    }
                     //   ttsUntil.speech("已经没有下一个目的地了",false);
                     mBinding.tvNavigate.setEnabled(true);
                 }
@@ -4674,6 +4744,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                         + ", task=" + activeNavigationTaskGeneration
                         + ", session=" + sessionGeneration
         );
+        stopPatrolFallback("导航错误");
         clearNavigationPrepareTimeout();
         if (screenCompartmentRouteActive) {
             cancelScreenCompartmentRoute("导航错误：" + code);
