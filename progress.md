@@ -1129,3 +1129,18 @@
 - `progress.md`：追加本轮实施、验证和回滚信息。
 - 上游 `send_point` 没有巡仓任务 ID；巡仓来源由本机按钮标记，在该标记有效时收到的有效上游路线均视为下一条巡仓路线。超时按“未收到下一点”判断，不等同于已证明上游网络断连；返程指令是否让真机实际移动须现场确认。
 - 回滚方式：对上述本轮新增/修改的仓库文件，使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/room-map-preview.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `docs/patrol-timeout-return.md` 和 `.trellis/tasks/09-23-patrol-point-timeout-return/`。不得处理原有未提交的换行差异或现场 JPG/TXT 文件。
+
+## 2026-09-23 - Task: 发布 v1.0.12-beta.23
+### What was done
+- 将应用版本更新为 `1.0.12-beta.23`、`versionCode` 更新为 `34`，准备以注解 tag 触发 GitHub 预发布构建，交付本机巡仓到点超时返出餐口兜底。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；42 个 Gradle 任务重新执行，单元测试与 Debug APK 构建通过。
+- `git diff --check -- app/build.gradle app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java docs/room-map-preview.md progress.md`：通过；IDE ReadLints 未报告新增诊断。
+- 真机到点等待、下一点取消计时和断连返程尚未验证；预发布需在机器人现场验收。
+
+### Notes
+- `app/build.gradle`：递增版本号和构建号，确保发布包与上一版区分。
+- `progress.md`：追加本次预发布准备、验证与回滚信息。
+- 本次功能提交为 `e9e55ea`；原有换行差异与现场 JPG/TXT 文件未纳入发布。
+- 回滚方式：发布后在仓库执行 `git revert <本次发布提交哈希>` 撤销版本调整；如需同时撤销巡仓兜底，随后执行 `git revert e9e55ea`，不改写已推送历史。已分发的预发布 APK 需通过后续版本替换。
