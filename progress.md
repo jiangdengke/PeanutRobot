@@ -1165,3 +1165,19 @@
 - `.trellis/tasks/10-14-robot-id-settings/`：记录 PRD 与 Trellis 任务上下文。
 - `task_id`、`robot_task_id` 仍为代码内固定值；如不同机器人需要不同任务 ID，需另行处理。
 - 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java README.md docs/settings-entry.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `RobotIdConfig.java`、`RobotIdConfigTest.java`、`docs/robot-id-settings.md` 和 `.trellis/tasks/10-14-robot-id-settings/`。不得处理原有未提交的换行差异或现场 JPG/TXT 文件。
+
+## 2026-10-14 - Task: 发布 v1.0.12
+### What was done
+- 将应用版本更新为正式版 `1.0.12`、`versionCode` 更新为 `35`，以注解 tag `v1.0.12` 触发 GitHub 正式 Release（不带 `-beta`，不标记为预发布）。
+- 发布说明汇总自 `v1.0.11` 以来的现场功能与修复，本版包含机器人 ID 设置（`109f683`）。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；42 个 Gradle 任务重新执行，单元测试与 Debug APK 构建通过。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+- 机器人 ID 设置与巡仓到点超时返回出餐口尚未在机器人现场验证；CI 产物仍为 Debug APK。
+
+### Notes
+- `app/build.gradle`：版本号改为 `1.0.12`，构建号递增为 `35`。
+- `progress.md`：追加本次正式发布准备、验证与回滚信息。
+- 原有换行差异与现场 JPG/TXT 文件、未跟踪的 `CLAUDE.md` 未纳入发布。
+- 回滚方式：发布后执行 `git revert <本次发布提交哈希>` 撤销版本调整，不改写已推送历史；如需撤下 GitHub Release，在 Releases 页面删除 `v1.0.12` 或改为预发布。已分发的 APK 需通过后续版本替换。
