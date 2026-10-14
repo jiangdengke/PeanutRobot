@@ -99,6 +99,7 @@ import com.yuandaima.peanutrobot.util.GPIOUtil;
 import com.yuandaima.peanutrobot.util.MapPointConfigSanitizer;
 import com.yuandaima.peanutrobot.util.MmkvUtils;
 import com.yuandaima.peanutrobot.util.NavigationSpeedConfig;
+import com.yuandaima.peanutrobot.util.RobotIdConfig;
 import com.yuandaima.peanutrobot.util.SettingsAccessConfig;
 import com.yuandaima.peanutrobot.util.TtsUntil;
 import com.yuandaima.peanutrobot.util.UpstreamChargeTaskParser;
@@ -157,7 +158,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             okhttp3.MediaType.get("application/json; charset=utf-8");
     private static final int REQUEST_PICK_IDLE_IMAGE = 2001;
     private static final int REQUEST_DIAGNOSTIC_LOG_EXPORT_PERMISSION = 2002;
-    private static final int WAREHOUSE_TASK_ROBOT_ID = 3;
     private static final int GO_CHARGE_TASK_ID = 789115;
     private static final int PATROL_WAREHOUSE_TASK_ID = 789110;
     private static final int PATROL_RETURN_POINT_ID = 2;
@@ -748,6 +748,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             dialog.dismiss();
             showUpstreamServerDialog();
         });
+        addSettingsEntry(content, "机器人 ID：" + RobotIdConfig.getRobotId(), () -> {
+            dialog.dismiss();
+            showRobotIdDialog();
+        });
         addSettingsEntry(content, "运行速度：" + describeNavigationSpeed(), () -> {
             dialog.dismiss();
             showNavigationSpeedDialog();
@@ -1012,6 +1016,84 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             );
         }
         tip("上游地址已设置为 " + host);
+    }
+
+    private void showRobotIdDialog() {
+        int currentRobotId = RobotIdConfig.getRobotId();
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(24);
+        content.setPadding(padding, padding / 2, padding, 0);
+
+        TextView currentRobotIdLabel = new TextView(this);
+        currentRobotIdLabel.setText("当前机器人 ID：" + currentRobotId);
+        currentRobotIdLabel.setTextSize(16);
+        content.addView(currentRobotIdLabel);
+
+        TextView affectedLabel = new TextView(this);
+        affectedLabel.setText("影响回充、巡仓、召回指令中的 robot_id");
+        affectedLabel.setTextSize(13);
+        affectedLabel.setPadding(0, dp(8), 0, 0);
+        content.addView(affectedLabel);
+
+        TextView robotIdHintLabel = new TextView(this);
+        robotIdHintLabel.setText("请输入机器人 ID（正整数）");
+        robotIdHintLabel.setTextSize(16);
+        robotIdHintLabel.setPadding(0, dp(12), 0, 0);
+        content.addView(robotIdHintLabel);
+
+        EditText robotIdInput = new EditText(this);
+        robotIdInput.setSingleLine(true);
+        robotIdInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        robotIdInput.setHint(String.valueOf(RobotIdConfig.DEFAULT_ROBOT_ID));
+        robotIdInput.setText(String.valueOf(currentRobotId));
+        robotIdInput.setSelectAllOnFocus(true);
+        content.addView(robotIdInput);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("机器人 ID")
+                .setView(content)
+                .setPositiveButton("保存", null)
+                .setNeutralButton("恢复默认", null)
+                .setNegativeButton("取消", null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String robotIdText = robotIdInput.getText().toString().trim();
+                if (TextUtils.isEmpty(robotIdText)) {
+                    robotIdInput.setError("请输入机器人 ID");
+                    return;
+                }
+                Integer robotId = RobotIdConfig.parseRobotId(robotIdText);
+                if (robotId == null) {
+                    robotIdInput.setError(
+                            "请输入 " + RobotIdConfig.MIN_ROBOT_ID
+                                    + "-" + RobotIdConfig.MAX_ROBOT_ID + " 之间的整数"
+                    );
+                    return;
+                }
+                if (!RobotIdConfig.saveRobotId(robotId)) {
+                    robotIdInput.setError("保存失败，请重新输入");
+                    return;
+                }
+                applyRobotIdChange();
+                dialog.dismiss();
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                RobotIdConfig.resetRobotId();
+                applyRobotIdChange();
+                dialog.dismiss();
+            });
+        });
+        dialog.show();
+    }
+
+    private void applyRobotIdChange() {
+        int robotId = RobotIdConfig.getRobotId();
+        DiagnosticLogRecorder.info("CONFIG", "机器人 ID 已更新 robotId=" + robotId);
+        tip("机器人 ID 已设置为 " + robotId);
     }
 
     private void openIdleImagePicker() {
@@ -3286,7 +3368,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void sendGoChargeTask(boolean startupAutoCharge) {
         try {
             JSONObject payload = new JSONObject();
-            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("robot_id", RobotIdConfig.getRobotId());
             payload.put("task_id", GO_CHARGE_TASK_ID);
             payload.put("robot_task_id", GO_CHARGE_ROBOT_TASK_ID);
             sendWarehouseTask("回充", payload.toString(), startupAutoCharge ? "回充发送完毕" : null);
@@ -3331,7 +3413,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void sendPatrolWarehouseTask() {
         try {
             JSONObject payload = new JSONObject();
-            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("robot_id", RobotIdConfig.getRobotId());
             payload.put("task_id", PATROL_WAREHOUSE_TASK_ID);
             payload.put("is_return", true);
             payload.put("robot_task_id", PATROL_WAREHOUSE_ROBOT_TASK_ID);
@@ -3345,7 +3427,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void sendRecallTask() {
         try {
             JSONObject payload = new JSONObject();
-            payload.put("robot_id", WAREHOUSE_TASK_ROBOT_ID);
+            payload.put("robot_id", RobotIdConfig.getRobotId());
             payload.put("task_id", RECALL_TASK_ID);
             payload.put("is_return", true);
             payload.put("robot_task_id", RECALL_ROBOT_TASK_ID);

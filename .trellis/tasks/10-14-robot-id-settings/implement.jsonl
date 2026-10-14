@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse MmkvUtils persistence and the AlertDialog settings pattern from the upstream address entry instead of adding a parallel config mechanism."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Record robot ID changes through DiagnosticLogRecorder with the CONFIG module without blocking callers."}

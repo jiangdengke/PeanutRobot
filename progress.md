@@ -1144,3 +1144,24 @@
 - `progress.md`：追加本次预发布准备、验证与回滚信息。
 - 本次功能提交为 `e9e55ea`；原有换行差异与现场 JPG/TXT 文件未纳入发布。
 - 回滚方式：发布后在仓库执行 `git revert <本次发布提交哈希>` 撤销版本调整；如需同时撤销巡仓兜底，随后执行 `git revert e9e55ea`，不改写已推送历史。已分发的预发布 APK 需通过后续版本替换。
+
+## 2026-10-14 - Task: 增加机器人 ID 设置
+### What was done
+- 将仓库任务指令中写死的机器人 ID `3` 改为可在“设置”内修改，默认值仍为 `3`，保存在 MMKV 中，升级不覆盖现场配置。
+- 设置弹窗新增“机器人 ID：<当前值>”入口，支持保存和恢复默认；只接受 `1-999999999` 的正整数，非法输入给出提示。
+- 回充（含启动自动回充）、巡仓、召回（含屏幕配送末点自动召回）每次发送时读取 ID，保存后下一次发送即生效，无需重启；修改写入 `CONFIG` 运行日志。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；新增 `RobotIdConfigTest` 5 个用例通过，现有单元测试及 Debug APK 构建通过。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java README.md docs/settings-entry.md`：通过；新增文件无行尾空白。
+- 未连接目标机器人，未验证设置弹窗交互和上游收到的 `robot_id`；需现场修改 ID 后分别触发回充、巡仓、召回确认。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/util/RobotIdConfig.java`：新增机器人 ID 默认值、解析、校验和 MMKV 读写。
+- `app/src/test/java/com/yuandaima/peanutrobot/util/RobotIdConfigTest.java`：新增范围校验和输入解析单元测试。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：移除 `WAREHOUSE_TASK_ROBOT_ID` 常量，3 种指令改为读取配置；设置弹窗新增机器人 ID 入口和编辑对话框。
+- `docs/robot-id-settings.md`：新增机器人 ID 设置现场说明。
+- `docs/settings-entry.md`、`README.md`：补充机器人 ID 设置项和默认值说明。
+- `.trellis/tasks/10-14-robot-id-settings/`：记录 PRD 与 Trellis 任务上下文。
+- `task_id`、`robot_task_id` 仍为代码内固定值；如不同机器人需要不同任务 ID，需另行处理。
+- 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java README.md docs/settings-entry.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `RobotIdConfig.java`、`RobotIdConfigTest.java`、`docs/robot-id-settings.md` 和 `.trellis/tasks/10-14-robot-id-settings/`。不得处理原有未提交的换行差异或现场 JPG/TXT 文件。

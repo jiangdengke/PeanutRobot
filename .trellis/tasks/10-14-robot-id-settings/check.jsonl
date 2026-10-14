@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that no hardcoded robot_id remains outside RobotIdConfig and all three warehouse payloads read it at send time."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify input validation, unit coverage, and Gradle build for the robot ID setting."}
