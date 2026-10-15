@@ -18,3 +18,6 @@ local.properties
 *.jks
 *.pdf
 /app/release/
+# 现场截图和运行日志导出，只留在本地
+/*.jpg
+/robot-runtime-*.txt
