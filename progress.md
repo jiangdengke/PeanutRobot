@@ -1203,3 +1203,17 @@
 - `README.md`：补充功能说明。
 - `.trellis/tasks/10-17-idle-lock-delivery-status/`：记录 PRD 与 Trellis 任务上下文。
 - 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml README.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `docs/idle-lock-delivery-status.md` 和 `.trellis/tasks/10-17-idle-lock-delivery-status/`。
+
+## 2026-10-17 - Task: 发布 v1.0.13-beta.1
+### What was done
+- 将应用版本更新为 `1.0.13-beta.1`、`versionCode` 更新为 `36`，以注解 tag 触发 GitHub 预发布构建，交付锁屏配送状态提示（`7606495`）。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；42 个 Gradle 任务重新执行，单元测试与 Debug APK 构建通过。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+- 锁屏提示的显示效果、“请取餐”切换和急停隐藏/恢复尚未在机器人现场验证；需重点确认急停时 `ESTOP` 日志为 `emergencyOpen=true`。
+
+### Notes
+- `app/build.gradle`：v1.0.12 正式版后开始 1.0.13 预发布系列，版本号改为 `1.0.13-beta.1`，构建号递增为 `36`。
+- `progress.md`：追加本次预发布准备、验证与回滚信息。
+- 回滚方式：发布后执行 `git revert <本次发布提交哈希>` 撤销版本调整；如需同时撤销锁屏配送状态，随后执行 `git revert 7606495`，不改写已推送历史。已分发的预发布 APK 需通过后续版本替换。
