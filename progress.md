@@ -1242,3 +1242,17 @@
 - `docs/idle-lock-delivery-status.md`、`README.md`：更新为锁屏配送提示说明。`CLAUDE.md`：补充 SDK 订阅只回调第一个订阅者的注意事项。
 - `.trellis/tasks/10-17-delivery-lock-screen/`：记录 PRD 与 Trellis 任务上下文。
 - 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml app/src/main/res/values/colors.xml README.md CLAUDE.md docs/idle-lock-delivery-status.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 View、布局、drawable、字体、许可证、工具类、测试和 `.trellis/tasks/10-17-delivery-lock-screen/`。如已提交，使用 `git revert <提交哈希>`。
+
+## 2026-10-17 - Task: 发布 v1.0.13-beta.2
+### What was done
+- 将应用版本更新为 `1.0.13-beta.2`、`versionCode` 更新为 `37`，以注解 tag 触发 GitHub 预发布构建，交付锁屏配送提示改版与急停修复（`f18a2cf`）。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：BUILD SUCCESSFUL；42 个 Gradle 任务重新执行，单元测试与 Debug APK 构建通过。
+- `git diff --check -- app/build.gradle progress.md`：通过。
+- 出发即锁屏、底部配送提示在现场熊猫壁纸上的效果、到点切换、急停隐藏/恢复（需确认 `ESTOP` 日志按下时为 `emergencyOpen=true`）和出发失败自动解锁尚未在机器人现场验证。
+
+### Notes
+- `app/build.gradle`：版本号改为 `1.0.13-beta.2`，构建号递增为 `37`。
+- `progress.md`：追加本次预发布准备、验证与回滚信息。
+- 回滚方式：发布后执行 `git revert <本次发布提交哈希>` 撤销版本调整；如需同时撤销本次功能，随后执行 `git revert f18a2cf`，不改写已推送历史。已分发的预发布 APK 需通过后续版本替换。
