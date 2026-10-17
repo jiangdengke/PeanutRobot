@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 壁纸下半部分的遮罩：从上方透明渐变到底部深色，保证配送文字在任意壁纸上可读。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="90"
+        android:centerColor="@color/delivery_screen_scrim_center"
+        android:endColor="@color/delivery_screen_scrim_top"
+        android:startColor="@color/delivery_screen_scrim_bottom"
+        android:type="linear" />
+</shape>

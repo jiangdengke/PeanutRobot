@@ -55,4 +55,12 @@
     <color name="delivery_completed_border">#91C99B</color>
     <color name="delivery_problem_surface">#FCEAEC</color>
     <color name="delivery_problem_border">#DEA0A8</color>
+    <color name="delivery_screen_scrim_top">#00140A26</color>
+    <color name="delivery_screen_scrim_center">#99140A26</color>
+    <color name="delivery_screen_scrim_bottom">#E6140A26</color>
+    <color name="delivery_screen_title_outline">@color/ui_primary</color>
+    <color name="delivery_screen_bay_background">@color/ui_primary</color>
+    <color name="delivery_screen_bay_text">@android:color/white</color>
+    <color name="delivery_screen_detail">#F3EDF8</color>
+    <color name="delivery_screen_track">#33FFFFFF</color>
 </resources>

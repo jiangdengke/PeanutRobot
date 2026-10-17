@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"Verify departure, arrival, completion, and cancellation still follow the contract and every state change refreshes the delivery screen."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify parser unit tests, animation cleanup on hide/pause/destroy, and the Gradle build."}

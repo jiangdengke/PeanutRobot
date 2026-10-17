@@ -1217,3 +1217,28 @@
 - `app/build.gradle`：v1.0.12 正式版后开始 1.0.13 预发布系列，版本号改为 `1.0.13-beta.1`，构建号递增为 `36`。
 - `progress.md`：追加本次预发布准备、验证与回滚信息。
 - 回滚方式：发布后执行 `git revert <本次发布提交哈希>` 撤销版本调整；如需同时撤销锁屏配送状态，随后执行 `git revert 7606495`，不改写已推送历史。已分发的预发布 APK 需通过后续版本替换。
+
+## 2026-10-17 - Task: 锁屏配送提示改版与急停修复
+### What was done
+- v1.0.13-beta.1 实机反馈“配送中”太小、不美观，按下急停后也没有消失。本轮把锁屏底部的小文字条改为叠在锁屏壁纸底部的配送提示：上方透明露出壁纸，底部约 30% 为从透明到深色的渐变遮罩，避开现场熊猫壁纸的五官（放在下半屏时会挡住熊猫，已下移，标题由 104sp 缩小到 80sp）；文字使用卡通字体站酷快乐体，标题为白字描边。前往点位显示超大“配送中...”（紫色描边）、进度文字和流动进度条；到点等待显示“请取餐...”和呼吸高亮的紫底白字“请从 X 号仓取餐”，两种状态统一使用主色紫 `ui_primary`（原橙色描边、黄色仓号经反馈改为与“配送中”一致）。第一版整屏紫/橙背景经反馈与项目风格违和；第二版带紫/黄餐盖图标和光圈，经反馈去掉图标，改为当前只显示文字的方案。
+- 点击“立即出发”且配送任务创建成功后立即锁屏，挡住主界面操作；仍用左上角 5 连击 + 进入密码解锁。机器人尚未开始行驶（未收到当前任务 `STATE_RUNNING`）就出发失败时，自动解除出发锁屏，方便重试。
+- 修复急停：Peanut SDK `subscribe` 只回调每个主题的第一个订阅者，App 先订阅了 `BUTTON_STATUS`，`PeanutRuntime` 收不到数据，`EVENT_EMERGENCY_STATUS_CHANGED` 从不触发。改为在 App 自己的 `buttonStatusCallback` 中解析 `{"data":{"info":...}}`，状态变化时写入 `ESTOP` 日志；急停按下期间隐藏配送提示，锁屏保留，松开后恢复。
+- 内容超出底部区域时等比缩小，缩放按两种状态中较高的一种计算，切换状态时标题大小不变；隐藏、Activity 暂停和销毁时停止所有动画。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；新增 `EmergencyButtonStatusParserTest` 4 个用例、`DeliveryLockScreenTextTest` 5 个用例通过。Debug APK 约 20.1MB（字体增加约 1.4MB）。
+- 在 Medium_Tablet 模拟器（2560×1600，密度 320）上用临时 debug 预览页，以项目中的照片和默认图标两种壁纸截图，确认两种状态的位置、字体、描边、配色和动画，文字在两种壁纸上都清晰；去掉图标后再次截图确认文字在下半屏居中；另以现场锁屏熊猫壁纸在 1920×1080 密度 240 下截图，确认下移后两种状态都不遮挡熊猫五官、标题大小一致、进度条正常显示。全屏版曾用 `wm size/density` 验证过 1280×800 密度 240 横屏和 800×1280 竖屏的自动缩放。预览页已删除，未提交。
+- 未在机器人上验证：出发即锁屏、到点切换、急停隐藏/恢复（需确认 `ESTOP` 日志按下时为 `emergencyOpen=true`）、出发失败自动解锁、实际屏保壁纸上的可读性。
+- 模拟器上 `MainActivity` 销毁时 Peanut SDK 内部导航线程空指针（`NavigationImpl.motionReset`），为无机器人环境下的 SDK 行为，与本轮改动无关。
+
+### Notes
+- `app/src/main/java/com/yuandaima/peanutrobot/view/DeliveryLockScreenView.java`、`app/src/main/res/layout/view_delivery_lock_screen.xml`：新增锁屏配送提示及动画。
+- `app/src/main/res/font/zcool_kuaile.ttf`、`app/src/main/assets/licenses/ZCOOL_KuaiLe_OFL.txt`：站酷快乐体及其 OFL 许可证。
+- `app/src/main/res/drawable/`：新增 `bg_delivery_screen_scrim`、`delivery_screen_bay_chip`、`delivery_screen_track`、`delivery_screen_progress`。
+- `app/src/main/res/values/colors.xml`：新增 `delivery_screen_*` 颜色。
+- `app/src/main/java/com/yuandaima/peanutrobot/util/EmergencyButtonStatusParser.java`、`DeliveryLockScreenText.java` 及对应测试：急停数据解析和提示文字。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：以 `refreshDeliveryLockScreen()` 替换旧的锁屏文字条逻辑；`buttonStatusCallback` 解析急停；出发后自动锁屏、`STATE_RUNNING` 清除出发锁屏标记、出发阶段取消时自动解锁；移除对 `PeanutRuntime` 急停事件的依赖。
+- `app/src/main/res/layout/activity_main.xml`：锁屏层中的 `tv_idle_delivery_status` 替换为 `DeliveryLockScreenView`。
+- `docs/idle-lock-delivery-status.md`、`README.md`：更新为锁屏配送提示说明。`CLAUDE.md`：补充 SDK 订阅只回调第一个订阅者的注意事项。
+- `.trellis/tasks/10-17-delivery-lock-screen/`：记录 PRD 与 Trellis 任务上下文。
+- 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml app/src/main/res/values/colors.xml README.md CLAUDE.md docs/idle-lock-delivery-status.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 View、布局、drawable、字体、许可证、工具类、测试和 `.trellis/tasks/10-17-delivery-lock-screen/`。如已提交，使用 `git revert <提交哈希>`。

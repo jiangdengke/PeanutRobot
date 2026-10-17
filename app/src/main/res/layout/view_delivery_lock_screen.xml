@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:background="@color/black"
+    tools:parentTag="android.widget.FrameLayout">
+
+    <!-- 上方留空露出锁屏壁纸，配送提示只占屏幕底部约 30%，避开壁纸主体（如熊猫五官）。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipChildren="false"
+        android:orientation="vertical">
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="7" />
+
+        <FrameLayout
+            android:id="@+id/fl_delivery_screen_panel"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="3"
+            android:background="@drawable/bg_delivery_screen_scrim"
+            android:clipChildren="false"
+            android:clipToPadding="false">
+
+            <LinearLayout
+                android:id="@+id/ll_delivery_screen_content"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <!-- 卡通描边标题：底层描边加阴影，上层白色填充，两层文字和尺寸保持一致。 -->
+                <FrameLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:clipChildren="false">
+
+                    <TextView
+                        android:id="@+id/tv_delivery_screen_title_outline"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:padding="6dp"
+                        android:shadowColor="#80000000"
+                        android:shadowDy="6"
+                        android:shadowRadius="8"
+                        android:text="配送中..."
+                        android:textColor="@color/delivery_screen_title_outline"
+                        android:textSize="80sp" />
+
+                    <TextView
+                        android:id="@+id/tv_delivery_screen_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:padding="6dp"
+                        android:text="配送中..."
+                        android:textColor="@android:color/white"
+                        android:textSize="80sp" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tv_delivery_screen_bay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/delivery_screen_bay_chip"
+                    android:elevation="8dp"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:paddingLeft="32dp"
+                    android:paddingTop="10dp"
+                    android:paddingRight="32dp"
+                    android:paddingBottom="10dp"
+                    android:text="请从 2 号仓取餐"
+                    android:textColor="@color/delivery_screen_bay_text"
+                    android:textSize="36sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tv_delivery_screen_detail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:maxLines="2"
+                    android:shadowColor="#99000000"
+                    android:shadowDy="3"
+                    android:shadowRadius="6"
+                    android:text="正在前往 第 1/3 个点位"
+                    android:textColor="@color/delivery_screen_detail"
+                    android:textSize="24sp" />
+
+                <FrameLayout
+                    android:id="@+id/fl_delivery_screen_track"
+                    android:layout_width="340dp"
+                    android:layout_height="12dp"
+                    android:layout_marginTop="18dp"
+                    android:background="@drawable/delivery_screen_track">
+
+                    <View
+                        android:id="@+id/v_delivery_screen_progress"
+                        android:layout_width="120dp"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/delivery_screen_progress" />
+                </FrameLayout>
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</merge>

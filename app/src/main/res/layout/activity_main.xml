@@ -773,21 +773,10 @@
                 android:contentDescription="屏保图片"
                 android:src="@mipmap/ic_launcher" />
 
-            <TextView
-                android:id="@+id/tv_idle_delivery_status"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="48dp"
-                android:background="#99000000"
-                android:paddingLeft="36dp"
-                android:paddingTop="18dp"
-                android:paddingRight="36dp"
-                android:paddingBottom="18dp"
-                android:text="配送中..."
-                android:textColor="@color/white"
-                android:textSize="32sp"
-                android:textStyle="bold"
+            <com.yuandaima.peanutrobot.view.DeliveryLockScreenView
+                android:id="@+id/v_delivery_lock_screen"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
                 android:visibility="gone" />
 
             <TextView

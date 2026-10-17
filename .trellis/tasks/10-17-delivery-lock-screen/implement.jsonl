@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"Departure auto-lock and unlock-on-failure hook into screen route start, STATE_RUNNING acceptance, and cancellation; navigation behavior must not change."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Record emergency stop changes through DiagnosticLogRecorder ESTOP without blocking SDK callback threads."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the idle lock overlay, unlock gesture, and delivery progress state instead of adding a second lock mechanism."}
