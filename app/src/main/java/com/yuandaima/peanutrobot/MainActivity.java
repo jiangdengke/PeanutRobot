@@ -28,9 +28,12 @@ import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.Settings;
 import android.text.Editable;
+import android.text.Spannable;
+import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
 import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
@@ -71,6 +74,7 @@ import com.keenon.sdk.component.runtime.PeanutRuntime;
 import com.keenon.sdk.component.runtime.RuntimeInfo;
 import com.keenon.sdk.constant.TopicName;
 import com.keenon.sdk.external.IDataCallback;
+import com.keenon.sdk.external.PeanutEvent;
 import com.keenon.sdk.external.PeanutSDK;
 import com.keenon.sdk.hedera.model.ApiError;
 import com.yuandaima.peanutrobot.adapter.MediaAdapter;
@@ -140,6 +144,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final String KEY_SINGLE_POINT_SPEED = "single_point_speed";
     private static final String KEY_MULTIPLE_POINT_SPEED = "multiple_point_speed";
     private static final long IDLE_LOCK_DELAY_MS = 60 * 1000L;
+    private static final String IDLE_DELIVERY_STATUS_TRAVELING_TEXT = "配送中";
+    private static final String IDLE_DELIVERY_STATUS_WAITING_TEXT = "请取餐";
+    private static final int IDLE_DELIVERY_STATUS_MAX_DOTS = 3;
+    private static final long IDLE_DELIVERY_STATUS_DOT_INTERVAL_MS = 500L;
     private static final long POINT_REFRESH_RETRY_DELAY_MS = 2000L;
     private static final int POINT_REFRESH_MAX_RETRY_COUNT = 10;
     private static final int COMPARTMENT_COUNT = 3;
@@ -219,6 +227,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final List<RobotPointChoice> mapRobotPointChoices = new ArrayList<>();
     Handler handler = new Handler(Looper.getMainLooper());
     private boolean idleLocked = false;
+    private int idleDeliveryStatusDotCount = 0;
+    private volatile boolean emergencyStopActive = false;
     private boolean unlockDialogShowing = false;
     private boolean idleConfigDialogShowing = false;
     private boolean coreInitialized = false;
@@ -283,6 +293,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         @Override
         public void run() {
             showIdleLock();
+        }
+    };
+    private final Runnable idleDeliveryStatusRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (activityDestroyed || !shouldShowIdleDeliveryStatus()) {
+                return;
+            }
+            idleDeliveryStatusDotCount = idleDeliveryStatusDotCount % IDLE_DELIVERY_STATUS_MAX_DOTS + 1;
+            renderIdleDeliveryStatus(idleDeliveryStatusDotCount);
+            handler.postDelayed(this, IDLE_DELIVERY_STATUS_DOT_INTERVAL_MS);
         }
     };
     private final Runnable pointRefreshRetryRunnable = new Runnable() {
@@ -389,6 +410,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             enterIdleLockFullscreen();
         }
         resetIdleLockTimer();
+        refreshIdleDeliveryStatus();
     }
     boolean mFlag=false;
 
@@ -398,6 +420,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         DiagnosticLogRecorder.info("LIFECYCLE", "MainActivity onPause");
         handler.removeCallbacks(uploadRunnable);
         handler.removeCallbacks(idleLockRunnable);
+        handler.removeCallbacks(idleDeliveryStatusRunnable);
     }
 
     @Override
@@ -464,14 +487,79 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         applyIdleScreenConfig();
         mBinding.flIdleLock.setVisibility(View.VISIBLE);
         mBinding.flIdleLock.bringToFront();
+        refreshIdleDeliveryStatus();
     }
 
     private void hideIdleLock() {
         idleLocked = false;
         resetHiddenUnlockTapState();
         mBinding.flIdleLock.setVisibility(View.GONE);
+        refreshIdleDeliveryStatus();
         exitIdleLockFullscreen();
         resetIdleLockTimer();
+    }
+
+    private boolean shouldShowIdleDeliveryStatus() {
+        return idleLocked && screenCompartmentRouteActive && !emergencyStopActive;
+    }
+
+    /**
+     * 锁屏且屏幕送餐进行中时显示状态并循环点动画：前往点位为“配送中...”，到点等待为“请取餐...”。
+     * 急停按下期间、配送结束或解除锁屏时隐藏并停止动画。
+     */
+    private void refreshIdleDeliveryStatus() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(this::refreshIdleDeliveryStatus);
+            return;
+        }
+        if (mBinding == null || activityDestroyed) {
+            return;
+        }
+        handler.removeCallbacks(idleDeliveryStatusRunnable);
+        if (!shouldShowIdleDeliveryStatus()) {
+            mBinding.tvIdleDeliveryStatus.setVisibility(View.GONE);
+            return;
+        }
+        idleDeliveryStatusDotCount = 0;
+        mBinding.tvIdleDeliveryStatus.setVisibility(View.VISIBLE);
+        handler.post(idleDeliveryStatusRunnable);
+    }
+
+    private void renderIdleDeliveryStatus(int visibleDotCount) {
+        String label = isArrivalWaitActive()
+                ? IDLE_DELIVERY_STATUS_WAITING_TEXT
+                : IDLE_DELIVERY_STATUS_TRAVELING_TEXT;
+        StringBuilder text = new StringBuilder(label);
+        for (int index = 0; index < IDLE_DELIVERY_STATUS_MAX_DOTS; index++) {
+            text.append('.');
+        }
+        SpannableString statusText = new SpannableString(text);
+        // 未显示的点保留占位但设为透明，避免居中文字随点数变化左右抖动。
+        int hiddenDotStart = label.length() + visibleDotCount;
+        if (hiddenDotStart < statusText.length()) {
+            statusText.setSpan(
+                    new ForegroundColorSpan(Color.TRANSPARENT),
+                    hiddenDotStart,
+                    statusText.length(),
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            );
+        }
+        mBinding.tvIdleDeliveryStatus.setText(statusText);
+    }
+
+    /**
+     * SDK 急停按钮状态变化回调。按下时隐藏锁屏上的配送状态，松开后按当前配送状态恢复；
+     * 不改变配送任务和导航。
+     */
+    private void handleEmergencyStatusChanged(boolean emergencyOpen) {
+        emergencyStopActive = emergencyOpen;
+        DiagnosticLogRecorder.info(
+                "ESTOP",
+                "急停状态变化 emergencyOpen=" + emergencyOpen
+                        + ", screenRoute=" + screenCompartmentRouteActive
+                        + ", idleLocked=" + idleLocked
+        );
+        refreshIdleDeliveryStatus();
     }
 
     private void resetIdleLockTimer() {
@@ -1896,6 +1984,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         createDeliveryProgressSnapshot(routeBaySnapshot);
         showDeliveryProgressView();
         refreshPointBindingUi();
+        refreshIdleDeliveryStatus();
         return true;
     }
 
@@ -2960,6 +3049,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         pendingDiagnosticLogExportSnapshot = null;
         pendingDiagnosticLogExportButton = null;
         handler.removeCallbacks(idleLockRunnable);
+        handler.removeCallbacks(idleDeliveryStatusRunnable);
         handler.removeCallbacks(pointRefreshRetryRunnable);
         handler.removeCallbacks(startupGoChargeRunnable);
         handler.removeCallbacks(warehouseTaskStatusClearRunnable);
@@ -3046,8 +3136,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         @Override
         public void onEvent(int event, Object obj) {
             Log.d(TAG, "onEvent:" + event + ", content: " + obj);
-
-
+            if (event == PeanutEvent.EVENT_EMERGENCY_STATUS_CHANGED && obj instanceof Boolean) {
+                handleEmergencyStatusChanged((Boolean) obj);
+            }
         }
 
         @Override
@@ -4316,6 +4407,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         arrivalWaitDeadlineElapsedRealtime = SystemClock.elapsedRealtime() + ARRIVAL_WAIT_TIMEOUT_MS;
         updateDeliveryProgressStatus(currentPosition, DELIVERY_STATUS_WAITING);
+        refreshIdleDeliveryStatus();
         handler.removeCallbacks(deliveryCountdownRunnable);
         handler.post(deliveryCountdownRunnable);
 
@@ -4435,10 +4527,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             deliveryProgressSummary = "配送完成 · 已开始召回";
             renderDeliveryProgress();
             refreshPointBindingUi();
+            refreshIdleDeliveryStatus();
             mBinding.tvNavigate.setEnabled(true);
             sendRecallTask();
         } else {
             updateDeliveryProgressStatus(routePosition + 1, DELIVERY_STATUS_TRAVELING);
+            refreshIdleDeliveryStatus();
             startNextScreenNavigationLeg(taskGeneration, routePosition + 1);
         }
     }
@@ -4574,6 +4668,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             deliveryProgressSummary = "配送结束 · " + reason;
             renderDeliveryProgress();
             refreshPointBindingUi();
+            refreshIdleDeliveryStatus();
         }
         Log.d(TAG, "screen compartment route cancelled: " + reason);
         DiagnosticLogRecorder.info(

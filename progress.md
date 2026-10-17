@@ -1181,3 +1181,25 @@
 - `progress.md`：追加本次正式发布准备、验证与回滚信息。
 - 原有换行差异与现场 JPG/TXT 文件、未跟踪的 `CLAUDE.md` 未纳入发布。
 - 回滚方式：发布后执行 `git revert <本次发布提交哈希>` 撤销版本调整，不改写已推送历史；如需撤下 GitHub Release，在 Releases 页面删除 `v1.0.12` 或改为预发布。已分发的 APK 需通过后续版本替换。
+
+## 2026-10-17 - Task: 锁屏显示配送中状态
+### What was done
+- 点击“立即出发”开始屏幕送餐后，锁屏底部显示“配送中...”，到点等待取餐时改为“请取餐...”，末尾 3 个点每 500 毫秒循环；未显示的点透明占位，文字不抖动。
+- 前往点位和到点等待取餐期间都显示，取餐完成或超时后切回“配送中...”；末点完成开始召回、任务取消、解除锁屏时隐藏并停止动画。上游路线、巡仓、回充、召回不显示。
+- 急停按下期间隐藏锁屏提示，锁屏保留；松开后若配送仍在进行则恢复。急停状态来自 SDK `EVENT_EMERGENCY_STATUS_CHANGED`，每次变化写入 `ESTOP` 运行日志；急停不取消配送、不改变导航。
+- Activity 暂停时停止动画，恢复时按当前状态重新显示，销毁时清理回调；锁屏触发、解锁和配送流程不变。
+
+### Testing
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon`：BUILD SUCCESSFUL；现有单元测试及 Debug APK 构建通过。
+- `git diff --check -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml README.md progress.md`：通过；新增文件无行尾空白。
+- 静态确认 `screenCompartmentRouteActive` 仅在开始、末点完成和取消 3 处修改，3 处都会刷新锁屏提示；到点开始等待和前往下一个点位时也会立即刷新文字。
+- 反编译 Peanut SDK 确认：`PeanutRuntime` 订阅 `ButtonStatusApi` 急停按钮状态，`info` 变化时更新 `RuntimeInfo.emergencyOpen` 并在主线程回调 `EVENT_EMERGENCY_STATUS_CHANGED`（10013），参数为 `Boolean`。`true` 表示急停按下是按字段名推断，未经现场确认；若含义相反，正常配送时提示将不显示，需按文档第 5 步验证。
+- 未连接目标机器人，未验证锁屏提示的位置、字号和点动画效果；需按 `docs/idle-lock-delivery-status.md` 的现场验证步骤确认。
+
+### Notes
+- `app/src/main/res/layout/activity_main.xml`：在 `fl_idle_lock` 中新增 `tv_idle_delivery_status`。
+- `app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java`：新增 `refreshIdleDeliveryStatus()`、`renderIdleDeliveryStatus()`、`handleEmergencyStatusChanged()` 和点动画 Runnable，并在锁屏显示/隐藏、送餐开始/到点/下一点/完成/取消、急停变化及生命周期中调用或清理。
+- `docs/idle-lock-delivery-status.md`：新增锁屏配送中提示说明和现场验证步骤。
+- `README.md`：补充功能说明。
+- `.trellis/tasks/10-17-idle-lock-delivery-status/`：记录 PRD 与 Trellis 任务上下文。
+- 回滚方式：使用 `git diff -- app/src/main/java/com/yuandaima/peanutrobot/MainActivity.java app/src/main/res/layout/activity_main.xml README.md progress.md` 定位本轮补丁并手动撤销；删除本轮新增的 `docs/idle-lock-delivery-status.md` 和 `.trellis/tasks/10-17-idle-lock-delivery-status/`。

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"Verify every path that sets screenCompartmentRouteActive also refreshes the lock screen status and that navigation behavior is unchanged."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify animation callbacks are removed on pause and destroy, and the Gradle build passes."}

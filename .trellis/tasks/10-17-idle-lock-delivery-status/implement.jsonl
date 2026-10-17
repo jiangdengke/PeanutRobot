@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/navigation-arrival-contract.md","reason":"Screen delivery start, final completion, and cancellation paths decide when the lock screen delivery status is shown; do not change their navigation behavior."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the existing idle lock overlay, main-thread handler, and hint text style instead of adding a parallel overlay."}
